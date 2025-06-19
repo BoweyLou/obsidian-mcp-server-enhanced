@@ -33,6 +33,7 @@ import { registerObsidianSearchReplaceTool } from "./tools/obsidianSearchReplace
 import { registerObsidianUpdateFileTool } from "./tools/obsidianUpdateFileTool/index.js";
 import { registerObsidianManageFrontmatterTool } from "./tools/obsidianManageFrontmatterTool/index.js";
 import { registerObsidianManageTagsTool } from "./tools/obsidianManageTagsTool/index.js";
+import { registerObsidianDataviewQueryTool } from "./tools/obsidianDataviewQueryTool/index.js";
 // Import transport setup functions.
 import { startHttpTransport } from "./transports/httpTransportNative.js";
 import { connectStdioTransport } from "./transports/stdioTransport.js";
@@ -141,6 +142,7 @@ async function createMcpServerInstance(
       obsidianService,
       vaultCacheService,
     );
+    await registerObsidianDataviewQueryTool(server, obsidianService);
 
     logger.info("Resources and tools registered successfully", context);
 
