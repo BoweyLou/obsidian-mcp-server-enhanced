@@ -2,7 +2,7 @@
 
 [![TypeScript](https://img.shields.io/badge/TypeScript-^5.8.3-blue.svg)](https://www.typescriptlang.org/)
 [![Model Context Protocol](https://img.shields.io/badge/MCP%20SDK-^1.12.1-green.svg)](https://modelcontextprotocol.io/)
-[![Version](https://img.shields.io/badge/Version-2.0.3-blue.svg)](./CHANGELOG.md)
+[![Version](https://img.shields.io/badge/Version-2.1.0-blue.svg)](./CHANGELOG.md)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Status](https://img.shields.io/badge/Status-Production-brightgreen.svg)](https://github.com/cyanheads/obsidian-mcp-server/issues)
 [![GitHub](https://img.shields.io/github/stars/cyanheads/obsidian-mcp-server?style=social)](https://github.com/cyanheads/obsidian-mcp-server)
@@ -12,6 +12,30 @@
 An MCP (Model Context Protocol) server providing comprehensive access to your Obsidian vault. Enables LLMs and AI agents to read, write, search, and manage your notes and files through the [Obsidian Local REST API plugin](https://github.com/coddingtonbear/obsidian-local-rest-api).
 
 Built on the [`cyanheads/mcp-ts-template`](https://github.com/cyanheads/mcp-ts-template), this server follows a modular architecture with robust error handling, logging, and security features.
+
+## ✨ What's New - Advanced Features ✨
+
+### 🔍 **Dataview Query Integration**
+Execute powerful Dataview DQL (Dataview Query Language) queries directly from your AI tools! Query your vault like a database with support for:
+- **TABLE queries**: `TABLE file.name, priority FROM #project WHERE status = "active"`
+- **Analytics**: Count links, analyze metadata, generate reports
+- **Date filtering**: Find notes by creation/modification dates
+- **Tag-based queries**: Query notes by tags and frontmatter
+
+### 📋 **Advanced Task Management**
+Comprehensive task querying and analysis with intelligent parsing:
+- **Smart Status Detection**: Incomplete `- [ ]`, Completed `- [x]`, In-Progress `- [/]`, Cancelled `- [-]`
+- **Date-Based Filtering**: Find tasks due today, completed yesterday, or within date ranges
+- **Priority Recognition**: High 🔴, Medium 🟡, Low 🟢 priorities plus text-based indicators
+- **Metadata Extraction**: Due dates 📅, completion dates ✅, tags, and project associations
+- **Multiple Output Formats**: List, table, or summary views
+
+### 🌐 **Remote Access via Tailscale**
+Access your Obsidian vault remotely and securely through Tailscale:
+- **Zero-config networking**: No port forwarding or firewall configuration needed
+- **End-to-end encryption**: Secure access to your vault from anywhere
+- **AI integration**: Use Claude.ai Remote MCP servers to access your vault from any device
+- **Simple setup**: Just enable Tailscale Funnel and connect
 
 ## 🚀 Core Capabilities: Obsidian Tools 🛠️
 
@@ -27,6 +51,8 @@ This server equips your AI with specialized tools to interact with your Obsidian
 | [`obsidian_manage_frontmatter`](./src/mcp-server/tools/obsidianManageFrontmatterTool/) | Atomically manages a note's YAML frontmatter.                   | - `get`, `set`, or `delete` frontmatter keys.<br/>- Avoids rewriting the entire file for metadata changes.                                             |
 | [`obsidian_manage_tags`](./src/mcp-server/tools/obsidianManageTagsTool/)               | Adds, removes, or lists tags for a note.                        | - Manages tags in both YAML frontmatter and inline content.                                                                                            |
 | [`obsidian_delete_file`](./src/mcp-server/tools/obsidianDeleteFileTool/)               | Permanently deletes a specified file from the vault.            | - Case-insensitive path fallback for safety.                                                                                                           |
+| [`obsidian_dataview_query`](./src/mcp-server/tools/obsidianDataviewQueryTool/)         | Execute Dataview DQL queries against your vault.                | - Run TABLE, LIST queries using Dataview syntax.<br/>- Query notes by tags, frontmatter, dates.<br/>- Generate reports and analytics.                |
+| [`obsidian_task_query`](./src/mcp-server/tools/obsidianTaskQueryTool/)                 | Search and analyze tasks across your vault.                     | - Filter by status, date ranges, priorities.<br/>- Multiple output formats.<br/>- Extract task metadata (due dates, tags).                           |
 
 ---
 
@@ -186,6 +212,71 @@ Add to your MCP client settings (e.g., `cline_mcp_settings.json`):
 }
 ```
 
+## 🌐 Remote Access Setup (Tailscale)
+
+For remote access to your Obsidian vault from anywhere, you can use Tailscale to securely expose your MCP server over the internet.
+
+### Prerequisites
+
+1. **Tailscale Account**: Sign up at [tailscale.com](https://tailscale.com)
+2. **Tailscale Installed**: Install Tailscale on your machine running the MCP server
+3. **Tailscale Funnel Enabled**: Enable Tailscale Funnel for your account
+
+### Setup Steps
+
+1. **Configure HTTP Transport**: Set the MCP server to use HTTP transport:
+   ```bash
+   export MCP_TRANSPORT_TYPE=http
+   export MCP_HTTP_PORT=3010
+   ```
+
+2. **Start the MCP Server**: 
+   ```bash
+   node dist/index.js
+   ```
+
+3. **Enable Tailscale Funnel**:
+   ```bash
+   # Replace 'your-machine-name' with your actual Tailscale machine name
+   tailscale funnel 3010
+   ```
+
+4. **Get Your Public URL**: Tailscale will provide a public HTTPS URL like:
+   ```
+   https://your-machine-name.tail123abc.ts.net
+   ```
+
+### Claude.ai Remote MCP Configuration
+
+Add to your Claude.ai Remote MCP servers:
+
+```json
+{
+  "url": "https://your-machine-name.tail123abc.ts.net/mcp",
+  "apiKey": "your-obsidian-api-key",
+  "name": "Obsidian Vault"
+}
+```
+
+### Security Considerations
+
+- **API Key Authentication**: The server uses your Obsidian API key for authentication
+- **Tailscale Encryption**: All traffic is encrypted end-to-end by Tailscale
+- **Private Network**: Only you can access the server through your Tailscale network
+- **Automatic SSL**: Tailscale Funnel provides automatic HTTPS certificates
+
+### Example Usage
+
+Once set up, you can use tools remotely from Claude.ai:
+
+```
+Use obsidian_task_query to show me tasks due today with format="table"
+```
+
+```
+Use obsidian_dataview_query to run: TABLE file.name FROM #meeting WHERE file.cday = date(today)
+```
+
 ## Project Structure
 
 The codebase follows a modular structure within the `src/` directory:
@@ -246,6 +337,8 @@ The Obsidian MCP Server provides a suite of tools for interacting with your vaul
 | `obsidian_manage_frontmatter` | Gets, sets, or deletes keys in a note's frontmatter.      | `filePath`, `operation`, `key`, `value?`                      |
 | `obsidian_manage_tags`        | Adds, removes, or lists tags in a note.                   | `filePath`, `operation`, `tags`                               |
 | `obsidian_delete_file`        | Permanently deletes a file from the vault.                | `filePath`                                                    |
+| `obsidian_dataview_query`     | Execute Dataview DQL queries against your vault.          | `query`, `format?`                                            |
+| `obsidian_task_query`         | Search and analyze tasks across your vault.               | `status?`, `dateRange?`, `folder?`, `priority?`, `format?`    |
 
 _Note: All tools support comprehensive error handling and return structured JSON responses._
 

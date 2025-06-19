@@ -5,6 +5,41 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.0] - 2025-06-20
+
+### Added
+
+- **🔍 Dataview Query Integration**: New `obsidian_dataview_query` tool for executing Dataview DQL queries
+  - Run TABLE, LIST queries using Dataview syntax
+  - Query notes by tags, frontmatter, creation dates, and content
+  - Generate reports and analytics from your vault
+  - Support for multiple output formats (table, list, raw)
+
+- **📋 Advanced Task Management**: New `obsidian_task_query` tool for comprehensive task analysis
+  - Smart task status detection: incomplete `- [ ]`, completed `- [x]`, in-progress `- [/]`, cancelled `- [-]`
+  - Date-based filtering: find tasks due today, completed yesterday, or within custom date ranges
+  - Priority recognition: High 🔴, Medium 🟡, Low 🟢 priorities plus text-based indicators
+  - Metadata extraction: due dates 📅, completion dates ✅, tags, and project associations
+  - Multiple output formats: list, table, or summary views
+
+- **🌐 Remote Access Documentation**: Comprehensive setup guide for Tailscale remote access
+  - Zero-config networking setup instructions
+  - Claude.ai Remote MCP server integration guide
+  - Security considerations and best practices
+  - Example usage patterns for remote vault access
+
+### Changed
+
+- **Enhanced Task Parsing**: Improved task metadata extraction following obsidian-tasks plugin standards
+- **Better Date Filtering**: More accurate date-based filtering for task queries
+- **Documentation Updates**: Added "What's New" section highlighting advanced features
+- **Version Bump**: Updated to v2.1.0 to reflect significant new functionality
+
+### Fixed
+
+- **Date Range Filtering**: Fixed incorrect date filtering logic in task queries
+- **Task Status Recognition**: Improved task checkbox parsing for various markdown formats
+
 ## [2.0.4] - 2025-06-13
 
 ### Added
