@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
 // Imports MUST be at the top level
-import { ServerType } from "@hono/node-server";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import http from "http";
 import { config, environment } from "./config/index.js"; // This loads .env via dotenv.config()
 import { initializeAndStartServer } from "./mcp-server/server.js";
 import { requestContextService, retryWithDelay } from "./utils/index.js";
@@ -18,9 +18,9 @@ import { VaultCacheService } from "./services/obsidianRestAPI/vaultCache/index.j
 let server: McpServer | undefined;
 /**
  * The main HTTP server instance (only stored globally for http shutdown).
- * @type {ServerType | undefined}
+ * @type {http.Server | undefined}
  */
-let httpServerInstance: ServerType | undefined;
+let httpServerInstance: http.Server | undefined;
 /**
  * Shared Obsidian REST API service instance.
  * @type {ObsidianRestApiService | undefined}
@@ -275,8 +275,8 @@ const start = async () => {
         startupContext,
       );
     } else if (transportType === "http" && serverOrHttpInstance) {
-      // The instance is of ServerType (http.Server or https.Server)
-      httpServerInstance = serverOrHttpInstance as ServerType; // Store ServerType for http transport
+      // The instance is of http.Server
+      httpServerInstance = serverOrHttpInstance as http.Server; // Store http.Server for http transport
       logger.debug(
         "Stored http.Server instance for http transport.",
         startupContext,

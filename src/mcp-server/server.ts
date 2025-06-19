@@ -14,8 +14,8 @@
  * @module src/mcp-server/server
  */
 
-import { ServerType } from "@hono/node-server";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import http from "http";
 // Import validated configuration and environment details.
 import { config, environment } from "../config/index.js";
 // Import core utilities: ErrorHandler, logger, requestContextService.
@@ -34,7 +34,7 @@ import { registerObsidianUpdateFileTool } from "./tools/obsidianUpdateFileTool/i
 import { registerObsidianManageFrontmatterTool } from "./tools/obsidianManageFrontmatterTool/index.js";
 import { registerObsidianManageTagsTool } from "./tools/obsidianManageTagsTool/index.js";
 // Import transport setup functions.
-import { startHttpTransport } from "./transports/httpTransport.js";
+import { startHttpTransport } from "./transports/httpTransportNative.js";
 import { connectStdioTransport } from "./transports/stdioTransport.js";
 
 /**
@@ -197,7 +197,7 @@ async function createMcpServerInstance(
 async function startTransport(
   obsidianService: ObsidianRestApiService,
   vaultCacheService: VaultCacheService | undefined,
-): Promise<McpServer | ServerType | void> {
+): Promise<McpServer | http.Server | void> {
   const transportType = config.mcpTransportType;
   const context = requestContextService.createRequestContext({
     operation: "startTransport",
@@ -261,7 +261,7 @@ async function startTransport(
 export async function initializeAndStartServer(
   obsidianService: ObsidianRestApiService,
   vaultCacheService: VaultCacheService | undefined,
-): Promise<void | McpServer | ServerType> {
+): Promise<void | McpServer | http.Server> {
   const context = requestContextService.createRequestContext({
     operation: "initializeAndStartServer",
   });
