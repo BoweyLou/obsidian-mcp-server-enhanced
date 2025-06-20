@@ -142,11 +142,11 @@ If running directly, they can be set in a `.env` file in the project root or dir
 | :------------------------------------ | :-------------------------------------------------------- | :---------------- | :----------------------- |
 | **`OBSIDIAN_API_KEY`**                | API Key from the Obsidian Local REST API plugin.          | **Yes**           | `undefined`              |
 | **`OBSIDIAN_BASE_URL`**               | Base URL of your Obsidian Local REST API.                 | **Yes**           | `http://127.0.0.1:27123` |
-| `MCP_TRANSPORT_TYPE`                  | Server transport: `stdio` or `http`.                      | No                | `stdio`                  |
+| `MCP_TRANSPORT_TYPE`                  | Server transport: `stdio` or `http`.                      | No                | `http`                   |
 | `MCP_HTTP_PORT`                       | Port for the HTTP server.                                 | No                | `3010`                   |
 | `MCP_HTTP_HOST`                       | Host for the HTTP server.                                 | No                | `127.0.0.1`              |
 | `MCP_ALLOWED_ORIGINS`                 | Comma-separated origins for CORS. **Set for production.** | No                | (none)                   |
-| **`MCP_AUTH_SECRET_KEY`**             | 32+ char secret for JWT auth. **Required for HTTP.**      | **Yes (if HTTP)** | `undefined`              |
+| `MCP_AUTH_SECRET_KEY`                 | 32+ char secret for JWT auth. **Not used in this version.** | No                | `undefined`              |
 | `MCP_LOG_LEVEL`                       | Logging level (`debug`, `info`, `error`, etc.).           | No                | `info`                   |
 | `OBSIDIAN_VERIFY_SSL`                 | Set to `false` to disable SSL verification.               | No                | `true`                   |
 | `OBSIDIAN_ENABLE_CACHE`               | Set to `true` to enable the in-memory vault cache.        | No                | `true`                   |

@@ -68,7 +68,7 @@ const EnvSchema = z.object({
   MCP_LOG_LEVEL: z.string().default("info"),
   LOGS_DIR: z.string().default(path.join(projectRoot, "logs")),
   NODE_ENV: z.string().default("development"),
-  MCP_TRANSPORT_TYPE: z.enum(["stdio", "http"]).default("stdio"),
+  MCP_TRANSPORT_TYPE: z.enum(["stdio", "http"]).default("http"),
   MCP_HTTP_PORT: z.coerce.number().int().positive().default(3010),
   MCP_HTTP_HOST: z.string().default("127.0.0.1"),
   MCP_ALLOWED_ORIGINS: z.string().optional(),
