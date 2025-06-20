@@ -158,15 +158,16 @@ function extractTaskMetadata(taskText: string): {
   } as any;
 
   // Extract priority (various formats)
-  // High: 🔴, ‼️, !!!, ❗, HIGH, 🔥
-  if (taskText.match(/🔴|‼️|!!!|❗|HIGH|🔥/i)) metadata.priority = "high";
-  // Medium: 🟡, !!, MEDIUM, 🟠
-  else if (taskText.match(/🟡|!!|MEDIUM|🟠/i)) metadata.priority = "medium";
-  // Low: 🟢, !, LOW, 🔵
-  else if (taskText.match(/🟢|!|LOW|🔵/i)) metadata.priority = "low";
+  // High: 🔴, ‼️, !!!, ❗, HIGH, 🔥, 🔼 (up arrow), ⬆️
+  if (taskText.match(/🔴|‼️|!!!|❗|HIGH|🔥|🔼|⬆️/i)) metadata.priority = "high";
+  // Medium: 🟡, !!, MEDIUM, 🟠, ◀️, ▶️
+  else if (taskText.match(/🟡|!!|MEDIUM|🟠|◀️|▶️/i)) metadata.priority = "medium";
+  // Low: 🟢, !, LOW, 🔵, 🔽 (down arrow), ⬇️
+  else if (taskText.match(/🟢|!|LOW|🔵|🔽|⬇️/i)) metadata.priority = "low";
 
   // Extract due date (obsidian-tasks format: 📅 YYYY-MM-DD)
-  const dueDateMatch = taskText.match(/(?:📅|due:?|@due\(?)\s*(\d{4}-\d{2}-\d{2})/i);
+  // Simple pattern to match 📅 followed by date anywhere in text
+  const dueDateMatch = taskText.match(/📅\s*(\d{4}-\d{2}-\d{2})/i);
   if (dueDateMatch) metadata.dueDate = dueDateMatch[1];
 
   // Extract completion date (multiple formats)
