@@ -111,6 +111,8 @@ Leverages the robust utilities provided by the `mcp-ts-template`:
 4.  **Node.js & npm**: Ensure you have Node.js (v18 or later recommended) and npm installed.
 5.  **Tailscale** (for remote access): Install [Tailscale](https://tailscale.com) and enable Tailscale Funnel for secure remote Claude.ai integration.
 
+> **💡 Quick Setup**: For automatic startup on boot, see the [Auto-Start Setup Guide](./scripts/autostart/README.md) after installation.
+
 ### Installation
 
 1.  Clone this enhanced repository:
@@ -276,6 +278,8 @@ Use obsidian_task_query to show me tasks due today with format="table"
 ```
 Use obsidian_dataview_query to run: TABLE file.name FROM #meeting WHERE file.cday = date(today)
 ```
+
+> **🚀 Pro Tip**: For production use, set up [automatic startup on boot](./scripts/autostart/README.md) so your server and Tailscale Funnel start automatically without manual intervention.
 
 ## Project Structure
 

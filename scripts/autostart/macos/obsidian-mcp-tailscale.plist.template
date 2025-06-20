@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.obsidian.mcp.tailscale</string>
+    
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/local/bin/tailscale</string>
+        <string>funnel</string>
+        <string>3010</string>
+    </array>
+    
+    <key>RunAtLoad</key>
+    <true/>
+    
+    <key>KeepAlive</key>
+    <true/>
+    
+    <key>StandardOutPath</key>
+    <string>{{PROJECT_PATH}}/logs/tailscale.out.log</string>
+    
+    <key>StandardErrorPath</key>
+    <string>{{PROJECT_PATH}}/logs/tailscale.err.log</string>
+    
+    <key>ProcessType</key>
+    <string>Background</string>
+    
+    <key>StartInterval</key>
+    <integer>5</integer>
+</dict>
+</plist>
