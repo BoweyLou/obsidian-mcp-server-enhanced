@@ -38,29 +38,6 @@ Advanced querying capabilities beyond the original:
 - **Priority Detection**: Visual and text-based priority parsing
 - **Multiple Output Formats**: Table, list, and summary views
 
-## ✨ Original Features (From Base Project)
-
-### 🔍 **Dataview Query Integration**
-Execute powerful Dataview DQL (Dataview Query Language) queries directly from your AI tools! Query your vault like a database with support for:
-- **TABLE queries**: `TABLE file.name, priority FROM #project WHERE status = "active"`
-- **Analytics**: Count links, analyze metadata, generate reports
-- **Date filtering**: Find notes by creation/modification dates
-- **Tag-based queries**: Query notes by tags and frontmatter
-
-### 📋 **Advanced Task Management**
-Comprehensive task querying and analysis with intelligent parsing:
-- **Smart Status Detection**: Incomplete `- [ ]`, Completed `- [x]`, In-Progress `- [/]`, Cancelled `- [-]`
-- **Date-Based Filtering**: Find tasks due today, completed yesterday, or within date ranges
-- **Priority Recognition**: High 🔴, Medium 🟡, Low 🟢 priorities plus text-based indicators
-- **Metadata Extraction**: Due dates 📅, completion dates ✅, tags, and project associations
-- **Multiple Output Formats**: List, table, or summary views
-
-### 🌐 **Tailscale Remote Access** (Enhanced in this fork)
-Original remote access capabilities with enhanced Claude.ai integration:
-- **Zero-config networking**: No port forwarding or firewall configuration needed
-- **End-to-end encryption**: Secure access to your vault from anywhere
-- **Enhanced Claude.ai Integration**: Optimized HTTP transport for Remote MCP
-- **Simple API Key Auth**: Direct URL-based authentication for Claude.ai
 
 ## 🚀 Core Capabilities: Obsidian Tools 🛠️
 
