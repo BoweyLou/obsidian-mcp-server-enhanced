@@ -9,7 +9,7 @@
 
 **Enhanced Obsidian MCP Server with Claude.ai Remote Integration, Tailscale Support, and Advanced Query Capabilities!**
 
-> **🔥 Enhanced Fork Notice:** This is an enhanced version of the excellent [cyanheads/obsidian-mcp-server](https://github.com/cyanheads/obsidian-mcp-server) with additional features specifically tailored for remote Claude.ai integration, advanced task querying, and enterprise-grade security via Tailscale.
+> **🔥 Enhanced Fork Notice:** This is an enhanced version of the excellent [cyanheads/obsidian-mcp-server](https://github.com/cyanheads/obsidian-mcp-server) with additional features specifically tailored for remote Claude.ai integration, advanced task querying, and security via Tailscale.
 
 An MCP (Model Context Protocol) server providing comprehensive access to your Obsidian vault. Enables LLMs and AI agents to read, write, search, and manage your notes and files through the [Obsidian Local REST API plugin](https://github.com/coddingtonbear/obsidian-local-rest-api).
 
