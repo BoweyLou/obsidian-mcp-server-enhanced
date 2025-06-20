@@ -109,14 +109,9 @@ Leverages the robust utilities provided by the `mcp-ts-template`:
 2.  **Obsidian Local REST API Plugin**: Install and enable the [Obsidian Local REST API plugin](https://github.com/coddingtonbear/obsidian-local-rest-api) within your Obsidian vault.
 3.  **API Key**: Configure an API key within the Local REST API plugin settings in Obsidian. You will need this key to configure the server.
 4.  **Node.js & npm**: Ensure you have Node.js (v18 or later recommended) and npm installed.
+5.  **Tailscale** (for remote access): Install [Tailscale](https://tailscale.com) and enable Tailscale Funnel for secure remote Claude.ai integration.
 
-### Install via npm (Original)
-
-```bash
-npm install obsidian-mcp-server
-```
-
-### Install Enhanced Version from Source
+### Installation
 
 1.  Clone this enhanced repository:
     ```bash
