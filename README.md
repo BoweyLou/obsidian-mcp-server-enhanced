@@ -342,46 +342,6 @@ The Obsidian MCP Server provides a suite of tools for interacting with your vaul
 
 _Note: All tools support comprehensive error handling and return structured JSON responses._
 
-## Resources
-
-**MCP Resources are not implemented in this version.**
-
-This server currently focuses on providing interactive tools for vault manipulation. Future development may introduce resource capabilities (e.g., exposing notes or search results as readable resources).
-
-## Development
-
-### Build and Test
-
-```bash
-# Build the project (compile TS to JS in dist/ and make executable)
-npm run build
-
-# Format code using Prettier
-npm run format
-
-# Test the server locally (HTTP transport recommended for Claude.ai)
-npm run start:http
-
-# Test the server locally using stdio transport (for local MCP clients only)
-npm run start:stdio
-
-# Generate a file tree representation for documentation (runs scripts/tree.ts)
-npm run tree
-
-# Clean build artifacts and then rebuild the project
-npm run rebuild
-
-# Fetch the Obsidian API spec (requires Obsidian running with Local REST API)
-npm run fetch:spec http://127.0.0.1:27123/ docs/obsidian-api/obsidian_rest_api_spec
-
-# Generate API documentation using TypeDoc
-npm run docs:generate
-
-# Inspect the server's capabilities using the MCP Inspector tool
-npm run inspect:http
-# or for local stdio transport:
-npm run inspect:stdio
-```
 
 ## License
 
