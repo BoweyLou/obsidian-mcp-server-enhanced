@@ -113,7 +113,7 @@ Leverages the robust utilities provided by the `mcp-ts-template`:
 - **Input Validation/Sanitization**: Uses `zod` for schema validation and custom sanitization logic.
 - **Request Context**: Tracking and correlation of operations via unique request IDs.
 - **Type Safety**: Strong typing enforced by TypeScript and Zod schemas.
-- **HTTP Transport Option**: Built-in Hono server with SSE, session management, CORS support, and JWT authentication.
+- **HTTP Transport Option**: Native Node.js HTTP server with session management, CORS support, and API key authentication.
 
 ### Obsidian Integration
 
@@ -216,16 +216,18 @@ _Using the encrypted HTTPS URL:_
 }
 ```
 
-### MCP Client Settings
+### Local MCP Client Settings (Optional)
 
-Add to your MCP client settings (e.g., `cline_mcp_settings.json`):
+> **Note**: For Claude.ai Remote MCP integration, skip this section and use the [Tailscale Remote Access Setup](#-remote-access-setup-tailscale) instead.
+
+For local MCP clients (e.g., Cline), add to your settings (e.g., `cline_mcp_settings.json`):
 
 ```json
 {
   "mcpServers": {
     "obsidian-mcp-server": {
       "command": "node",
-      "args": ["/path/to/your/obsidian-mcp-server/dist/index.js"],
+      "args": ["/path/to/your/obsidian-mcp-server-enhanced/dist/index.js"],
       "env": {
         "OBSIDIAN_API_KEY": "YOUR_OBSIDIAN_API_KEY",
         "OBSIDIAN_BASE_URL": "http://127.0.0.1:27123",
@@ -282,15 +284,7 @@ Add to your Claude.ai Remote MCP servers with simplified authentication:
 }
 ```
 
-**Or use Authorization header method:**
-
-```json
-{
-  "url": "https://your-machine-name.tail123abc.ts.net/mcp",
-  "apiKey": "your-obsidian-api-key", 
-  "name": "Obsidian Vault"
-}
-```
+> **Note**: Claude.ai Remote MCP only supports URL parameter authentication. The API key must be included in the URL as shown above.
 
 ### Security Considerations
 
@@ -393,13 +387,11 @@ npm run build
 # Format code using Prettier
 npm run format
 
-# Test the server locally using stdio transport
-npm start
-# or specifically:
-npm run start:stdio
-
-# Test the server locally using http transport
+# Test the server locally (HTTP transport recommended for Claude.ai)
 npm run start:http
+
+# Test the server locally using stdio transport (for local MCP clients only)
+npm run start:stdio
 
 # Generate a file tree representation for documentation (runs scripts/tree.ts)
 npm run tree
@@ -414,9 +406,9 @@ npm run fetch:spec http://127.0.0.1:27123/ docs/obsidian-api/obsidian_rest_api_s
 npm run docs:generate
 
 # Inspect the server's capabilities using the MCP Inspector tool
-npm run inspect:stdio
-# or for the http transport:
 npm run inspect:http
+# or for local stdio transport:
+npm run inspect:stdio
 ```
 
 ## License
