@@ -1,19 +1,44 @@
-# Obsidian MCP Server
+# Obsidian MCP Server - Enhanced
 
 [![TypeScript](https://img.shields.io/badge/TypeScript-^5.8.3-blue.svg)](https://www.typescriptlang.org/)
 [![Model Context Protocol](https://img.shields.io/badge/MCP%20SDK-^1.12.1-green.svg)](https://modelcontextprotocol.io/)
 [![Version](https://img.shields.io/badge/Version-2.1.0-blue.svg)](./CHANGELOG.md)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-[![Status](https://img.shields.io/badge/Status-Production-brightgreen.svg)](https://github.com/cyanheads/obsidian-mcp-server/issues)
-[![GitHub](https://img.shields.io/github/stars/cyanheads/obsidian-mcp-server?style=social)](https://github.com/cyanheads/obsidian-mcp-server)
+[![Status](https://img.shields.io/badge/Status-Enhanced-brightgreen.svg)](https://github.com/BoweyLou/obsidian-mcp-server-enhanced/issues)
+[![Original](https://img.shields.io/badge/Fork%20of-cyanheads/obsidian--mcp--server-blue.svg)](https://github.com/cyanheads/obsidian-mcp-server)
 
-**Empower your AI agents and development tools with seamless Obsidian integration!**
+**Enhanced Obsidian MCP Server with Claude.ai Remote Integration, Tailscale Support, and Advanced Query Capabilities!**
+
+> **🔥 Enhanced Fork Notice:** This is an enhanced version of the excellent [cyanheads/obsidian-mcp-server](https://github.com/cyanheads/obsidian-mcp-server) with additional features specifically tailored for remote Claude.ai integration, advanced task querying, and enterprise-grade security via Tailscale.
 
 An MCP (Model Context Protocol) server providing comprehensive access to your Obsidian vault. Enables LLMs and AI agents to read, write, search, and manage your notes and files through the [Obsidian Local REST API plugin](https://github.com/coddingtonbear/obsidian-local-rest-api).
 
 Built on the [`cyanheads/mcp-ts-template`](https://github.com/cyanheads/mcp-ts-template), this server follows a modular architecture with robust error handling, logging, and security features.
 
-## ✨ What's New - Advanced Features ✨
+## 🚀 Enhanced Features (This Fork)
+
+### 🌐 **Claude.ai Remote Integration**
+Perfect integration with Claude.ai's Remote MCP feature:
+- **Native HTTP Transport**: Rebuilt transport layer for Claude.ai compatibility
+- **Simple API Key Authentication**: Uses your Obsidian API key in the external URL
+- **Zero Configuration**: Works out-of-the-box with Claude.ai Remote MCP servers
+- **Production Ready**: Enterprise-grade stability and error handling
+
+### 🔒 **Tailscale Secure Remote Access**
+Access your Obsidian vault securely from anywhere:
+- **Tailscale Funnel Integration**: Secure HTTPS endpoints with automatic certificates
+- **End-to-End Encryption**: All traffic encrypted through Tailscale network
+- **No Port Forwarding**: Zero network configuration required
+- **Access Control**: Built-in Tailscale ACL support for enterprise security
+
+### 📊 **Enhanced Task & Query System**
+Advanced querying capabilities beyond the original:
+- **Tasks Plugin Integration**: Deep integration with Obsidian Tasks plugin
+- **Advanced Date Parsing**: Natural language date recognition
+- **Priority Detection**: Visual and text-based priority parsing
+- **Multiple Output Formats**: Table, list, and summary views
+
+## ✨ Original Features (From Base Project)
 
 ### 🔍 **Dataview Query Integration**
 Execute powerful Dataview DQL (Dataview Query Language) queries directly from your AI tools! Query your vault like a database with support for:
@@ -30,12 +55,12 @@ Comprehensive task querying and analysis with intelligent parsing:
 - **Metadata Extraction**: Due dates 📅, completion dates ✅, tags, and project associations
 - **Multiple Output Formats**: List, table, or summary views
 
-### 🌐 **Remote Access via Tailscale**
-Access your Obsidian vault remotely and securely through Tailscale:
+### 🌐 **Tailscale Remote Access** (Enhanced in this fork)
+Original remote access capabilities with enhanced Claude.ai integration:
 - **Zero-config networking**: No port forwarding or firewall configuration needed
 - **End-to-end encryption**: Secure access to your vault from anywhere
-- **AI integration**: Use Claude.ai Remote MCP servers to access your vault from any device
-- **Simple setup**: Just enable Tailscale Funnel and connect
+- **Enhanced Claude.ai Integration**: Optimized HTTP transport for Remote MCP
+- **Simple API Key Auth**: Direct URL-based authentication for Claude.ai
 
 ## 🚀 Core Capabilities: Obsidian Tools 🛠️
 
@@ -108,18 +133,18 @@ Leverages the robust utilities provided by the `mcp-ts-template`:
 3.  **API Key**: Configure an API key within the Local REST API plugin settings in Obsidian. You will need this key to configure the server.
 4.  **Node.js & npm**: Ensure you have Node.js (v18 or later recommended) and npm installed.
 
-### Install via npm (Recommended)
+### Install via npm (Original)
 
 ```bash
 npm install obsidian-mcp-server
 ```
 
-### Install from Source
+### Install Enhanced Version from Source
 
-1.  Clone the repository:
+1.  Clone this enhanced repository:
     ```bash
-    git clone https://github.com/cyanheads/obsidian-mcp-server.git
-    cd obsidian-mcp-server
+    git clone https://github.com/BoweyLou/obsidian-mcp-server-enhanced.git
+    cd obsidian-mcp-server-enhanced
     ```
 2.  Install dependencies:
     ```bash
@@ -246,14 +271,23 @@ For remote access to your Obsidian vault from anywhere, you can use Tailscale to
    https://your-machine-name.tail123abc.ts.net
    ```
 
-### Claude.ai Remote MCP Configuration
+### Claude.ai Remote MCP Configuration (Enhanced)
 
-Add to your Claude.ai Remote MCP servers:
+Add to your Claude.ai Remote MCP servers with simplified authentication:
+
+```json
+{
+  "url": "https://your-machine-name.tail123abc.ts.net/mcp?api_key=your-obsidian-api-key",
+  "name": "Obsidian Vault"
+}
+```
+
+**Or use Authorization header method:**
 
 ```json
 {
   "url": "https://your-machine-name.tail123abc.ts.net/mcp",
-  "apiKey": "your-obsidian-api-key",
+  "apiKey": "your-obsidian-api-key", 
   "name": "Obsidian Vault"
 }
 ```
@@ -389,8 +423,20 @@ npm run inspect:http
 
 This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
 
+## Attribution
+
+This enhanced version is based on the excellent work by [cyanheads](https://github.com/cyanheads) in the original [obsidian-mcp-server](https://github.com/cyanheads/obsidian-mcp-server) project. All core functionality and architecture credit goes to the original author.
+
+**Enhancements in this fork:**
+- Claude.ai Remote MCP integration and compatibility fixes
+- Tailscale Funnel integration for secure remote access
+- Enhanced HTTP transport layer with simplified authentication
+- Advanced task querying with Tasks plugin integration
+- Production-ready configuration for enterprise use
+
 ---
 
 <div align="center">
-Built with the <a href="https://modelcontextprotocol.io/">Model Context Protocol</a>
+Built with the <a href="https://modelcontextprotocol.io/">Model Context Protocol</a><br>
+Enhanced for <a href="https://claude.ai">Claude.ai</a> Remote Integration
 </div>

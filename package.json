@@ -15,12 +15,12 @@
   "type": "module",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/cyanheads/obsidian-mcp-server.git"
+    "url": "git+https://github.com/BoweyLou/obsidian-mcp-server-enhanced.git"
   },
   "bugs": {
-    "url": "https://github.com/cyanheads/obsidian-mcp-server/issues"
+    "url": "https://github.com/BoweyLou/obsidian-mcp-server-enhanced/issues"
   },
-  "homepage": "https://github.com/cyanheads/obsidian-mcp-server#readme",
+  "homepage": "https://github.com/BoweyLou/obsidian-mcp-server-enhanced#readme",
   "scripts": {
     "build": "tsc && node --loader ts-node/esm scripts/make-executable.ts dist/index.js",
     "start": "node dist/index.js",
