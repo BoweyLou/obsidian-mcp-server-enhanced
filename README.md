@@ -343,6 +343,11 @@ The Obsidian MCP Server provides a suite of tools for interacting with your vaul
 | `obsidian_delete_file`        | Permanently deletes a file from the vault.                | `filePath`                                                    |
 | `obsidian_dataview_query`     | Execute Dataview DQL queries against your vault.          | `query`, `format?`                                            |
 | `obsidian_task_query`         | Search and analyze tasks across your vault.               | `status?`, `dateRange?`, `folder?`, `priority?`, `format?`    |
+| `obsidian_periodic_notes`     | Create and manage daily, weekly, monthly, yearly notes.   | `operation`, `periodType`, `date?`, `content?`, `append?`     |
+| `obsidian_block_reference`    | Work with block references and heading operations.        | `operation`, `filePath`, `heading?`, `content?`, `blockId?`   |
+| `obsidian_graph_analysis`     | Analyze note connections and vault relationships.         | `operation`, `filePath?`, `minConnections?`, `maxDepth?`      |
+| `obsidian_template_system`    | Create files from templates with variable substitution.   | `operation`, `templatePath?`, `targetPath?`, `variables?`     |
+| `obsidian_smart_linking`      | Get intelligent link suggestions and recommendations.     | `operation`, `filePath?`, `content?`, `maxSuggestions?`       |
 
 _Note: All tools support comprehensive error handling and return structured JSON responses._
 
@@ -360,6 +365,7 @@ This enhanced version is based on the excellent work by [cyanheads](https://gith
 - Tailscale Funnel integration for secure remote access
 - Enhanced HTTP transport layer with simplified authentication
 - Advanced task querying with Tasks plugin integration
+- **5 New Advanced Tools**: Periodic notes, block references, graph analysis, template system, and smart linking
 - Production-ready configuration for enterprise use
 
 ---
