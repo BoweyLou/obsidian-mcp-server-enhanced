@@ -61,8 +61,8 @@ export const ObsidianListFilesInputSchema = z
      * - A value of `-1` (the default) indicates infinite recursion, listing all subdirectories.
      */
     recursionDepth: z
-      .number()
-      .int()
+      .union([z.number(), z.string().transform((val) => parseInt(val, 10))])
+      .pipe(z.number().int())
       .default(-1)
       .describe(
         "Maximum recursion depth. 0 for no recursion, -1 for infinite (default).",
