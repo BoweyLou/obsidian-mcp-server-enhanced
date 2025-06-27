@@ -62,7 +62,8 @@ function setCorsHeaders(res: http.ServerResponse) {
 }
 
 /**
- * Validates the API key from the Authorization header or URL query parameter.
+ * Validates the API key from URL query parameter.
+ * Claude.ai will connect with: http://127.0.0.1:3010/mcp?api_key=YOUR_API_KEY
  */
 function validateApiKey(req: http.IncomingMessage, url: URL): boolean {
   // Use the Obsidian API key for MCP authentication
@@ -71,20 +72,7 @@ function validateApiKey(req: http.IncomingMessage, url: URL): boolean {
     return true;
   }
 
-  // First try Authorization header (preferred method)
-  const authHeader = req.headers.authorization;
-  if (authHeader) {
-    // Support both "Bearer <token>" and "<token>" formats
-    const token = authHeader.startsWith("Bearer ") 
-      ? authHeader.slice(7) 
-      : authHeader;
-    
-    if (token === config.obsidianApiKey) {
-      return true;
-    }
-  }
-
-  // Fallback: try API key from query parameter
+  // Check for API key in query parameter
   const apiKeyFromQuery = url.searchParams.get('api_key');
   if (apiKeyFromQuery && apiKeyFromQuery === config.obsidianApiKey) {
     return true;
