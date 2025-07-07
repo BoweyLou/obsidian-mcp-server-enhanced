@@ -41,9 +41,9 @@ check_mcp_server() {
 }
 
 check_tailscale_funnel() {
-    # Check if Tailscale funnel is running on current MCP port
+    # Check if Tailscale funnel is running by checking status
     local expected_port=${MCP_PORT:-3010}
-    if ps aux | grep "tailscale.*funnel.*$expected_port" | grep -v grep >/dev/null; then
+    if tailscale funnel status | grep -q "proxy http://127.0.0.1:$expected_port"; then
         return 0
     else
         log "ERROR: Tailscale funnel not running on port $expected_port"
@@ -82,19 +82,11 @@ start_tailscale_funnel() {
     local port=${MCP_PORT:-3010}
     log "Starting Tailscale funnel on port $port..."
     
-    # Kill any existing funnel
-    if [ -f "$FUNNEL_PID_FILE" ]; then
-        OLD_PID=$(cat "$FUNNEL_PID_FILE")
-        kill -TERM "$OLD_PID" 2>/dev/null || true
-        rm -f "$FUNNEL_PID_FILE"
-    fi
+    # Reset any existing configuration
+    tailscale serve reset 2>/dev/null || true
     
-    # Kill any existing funnel processes
-    pkill -f "tailscale.*funnel" 2>/dev/null || true
-    
-    # Start new funnel
-    nohup tailscale funnel $port > "$PROJECT_DIR/funnel.log" 2>&1 &
-    echo $! > "$FUNNEL_PID_FILE"
+    # Start new funnel in background
+    tailscale funnel --bg $port > "$PROJECT_DIR/funnel.log" 2>&1
     
     # Wait for funnel to start
     sleep 3

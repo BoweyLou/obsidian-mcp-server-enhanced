@@ -297,8 +297,11 @@ export async function startHttpTransport(
           // In stateless mode, create transport if it doesn't exist
           transport = new StreamableHTTPServerTransport({
             sessionIdGenerator: undefined,
+            onsessioninitialized: (newId) => {
+              httpTransports["stateless"] = transport!;
+              logger.info(`HTTP Stateless transport initialized for non-init request`, transportContext);
+            },
           });
-          httpTransports["stateless"] = transport;
           const mcpServer = await createServerInstanceFn();
           await mcpServer.connect(transport);
         }
@@ -319,8 +322,11 @@ export async function startHttpTransport(
           // In stateless mode, create transport if it doesn't exist
           transport = new StreamableHTTPServerTransport({
             sessionIdGenerator: undefined,
+            onsessioninitialized: (newId) => {
+              httpTransports["stateless"] = transport!;
+              logger.info(`HTTP Stateless transport initialized for non-init request`, transportContext);
+            },
           });
-          httpTransports["stateless"] = transport;
           const mcpServer = await createServerInstanceFn();
           await mcpServer.connect(transport);
         }
