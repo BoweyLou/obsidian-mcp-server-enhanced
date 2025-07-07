@@ -69,11 +69,26 @@ function validateApiKey(req: http.IncomingMessage, url: URL): boolean {
   // Use the Obsidian API key for MCP authentication
   // If no Obsidian API key is configured, skip authentication
   if (!config.obsidianApiKey || config.obsidianApiKey === "dummy") {
+    logger.debug("API key validation skipped - no key configured");
     return true;
   }
 
   // Check for API key in query parameter
   const apiKeyFromQuery = url.searchParams.get('api_key');
+  
+  const validationContext = requestContextService.createRequestContext({
+    operation: "ApiKeyValidation",
+    hasApiKeyInQuery: !!apiKeyFromQuery,
+    apiKeyMatches: apiKeyFromQuery === config.obsidianApiKey,
+    queryParams: Array.from(url.searchParams.keys()),
+    apiKeyLength: apiKeyFromQuery?.length || 0,
+    configKeyLength: config.obsidianApiKey.length,
+    // Show first/last 4 chars of keys for debugging
+    apiKeyPreview: apiKeyFromQuery ? `${apiKeyFromQuery.substring(0, 4)}...${apiKeyFromQuery.substring(apiKeyFromQuery.length - 4)}` : "none",
+    configKeyPreview: `${config.obsidianApiKey.substring(0, 4)}...${config.obsidianApiKey.substring(config.obsidianApiKey.length - 4)}`,
+  });
+  logger.debug("API key validation", validationContext);
+  
   if (apiKeyFromQuery && apiKeyFromQuery === config.obsidianApiKey) {
     return true;
   }
@@ -148,6 +163,21 @@ export async function startHttpTransport(
 
       const url = new URL(req.url!, `http://${req.headers.host}`);
       
+      // Log all incoming requests for debugging
+      const requestContext = requestContextService.createRequestContext({
+        operation: "IncomingHTTPRequest",
+        method: req.method || "unknown",
+        url: req.url || "unknown",
+        headers: JSON.stringify({
+          host: req.headers.host,
+          "user-agent": req.headers["user-agent"],
+          "mcp-session-id": req.headers["mcp-session-id"],
+          authorization: req.headers.authorization ? "[REDACTED]" : undefined,
+        }),
+        query: url.search,
+      });
+      logger.info(`Incoming HTTP request: ${req.method} ${req.url}`, requestContext);
+      
       // Only handle our MCP endpoint
       if (url.pathname !== MCP_ENDPOINT_PATH) {
         res.writeHead(404);
@@ -163,6 +193,12 @@ export async function startHttpTransport(
 
       // Validate API key if authentication is configured
       if (!validateApiKey(req, url)) {
+        logger.warning(`Authentication failed for request: ${req.method} ${req.url}`, {
+          ...requestContext,
+          authFailure: true,
+          hasApiKeyInQuery: url.searchParams.has('api_key'),
+          configuredApiKey: config.obsidianApiKey ? "[SET]" : "[NOT SET]",
+        });
         res.writeHead(401, { "Content-Type": "application/json" });
         res.end(JSON.stringify({
           jsonrpc: "2.0",
@@ -173,33 +209,64 @@ export async function startHttpTransport(
       }
 
       const sessionId = req.headers["mcp-session-id"] as string;
-      let transport = sessionId ? httpTransports[sessionId] : undefined;
+      let transport: StreamableHTTPServerTransport | undefined;
       
-      if (transport && sessionId) {
-        sessionActivity[sessionId] = Date.now();
+      if (config.mcpHttpStateless) {
+        // In stateless mode, use a single shared transport
+        transport = httpTransports["stateless"] || undefined;
+      } else {
+        // In session mode, use session-based transport lookup
+        transport = sessionId ? httpTransports[sessionId] : undefined;
+        if (transport && sessionId) {
+          sessionActivity[sessionId] = Date.now();
+        }
       }
 
       if (req.method === "POST") {
         const body = await parseJsonBody(req);
+        
+        // Log POST body for debugging (without sensitive data)
+        logger.debug(`POST request body`, {
+          ...requestContext,
+          bodyKeys: Object.keys(body || {}),
+          method: body?.method,
+          hasId: !!body?.id,
+          hasParams: !!body?.params,
+        });
         const isInitReq = isInitializeRequest(body);
         const requestId = body?.id || null;
 
         if (isInitReq) {
+          logger.info(`Received InitializeRequest`, {
+            ...requestContext,
+            isInitReq: true,
+            hasExistingTransport: !!transport,
+            sessionId: sessionId || "none",
+            statelessMode: config.mcpHttpStateless,
+          });
+          
           if (transport) {
             logger.warning("Received InitializeRequest on existing session. Closing old session.");
             await transport.close();
           }
 
           transport = new StreamableHTTPServerTransport({
-            sessionIdGenerator: () => randomUUID(),
+            sessionIdGenerator: config.mcpHttpStateless ? undefined : () => randomUUID(),
             onsessioninitialized: (newId) => {
-              httpTransports[newId] = transport!;
-              sessionActivity[newId] = Date.now();
-              const sessionContext = requestContextService.createRequestContext({
-                operation: "sessionCreated",
-                newSessionId: newId,
-              });
-              logger.info(`HTTP Session created: ${newId}`, sessionContext);
+              if (config.mcpHttpStateless) {
+                // In stateless mode, store under "stateless" key
+                httpTransports["stateless"] = transport!;
+                logger.info(`HTTP Stateless transport initialized`, transportContext);
+              } else {
+                // In session mode, store under session ID
+                httpTransports[newId] = transport!;
+                sessionActivity[newId] = Date.now();
+                const sessionContext = requestContextService.createRequestContext({
+                  operation: "sessionCreated",
+                  newSessionId: newId,
+                });
+                logger.info(`HTTP Session created: ${newId}`, sessionContext);
+              }
             },
           });
 
@@ -218,7 +285,7 @@ export async function startHttpTransport(
 
           const mcpServer = await createServerInstanceFn();
           await mcpServer.connect(transport);
-        } else if (!transport) {
+        } else if (!transport && !config.mcpHttpStateless) {
           res.writeHead(404, { "Content-Type": "application/json" });
           res.end(JSON.stringify({
             jsonrpc: "2.0",
@@ -226,13 +293,21 @@ export async function startHttpTransport(
             id: requestId,
           }));
           return;
+        } else if (!transport && config.mcpHttpStateless) {
+          // In stateless mode, create transport if it doesn't exist
+          transport = new StreamableHTTPServerTransport({
+            sessionIdGenerator: undefined,
+          });
+          httpTransports["stateless"] = transport;
+          const mcpServer = await createServerInstanceFn();
+          await mcpServer.connect(transport);
         }
 
         // Let MCP transport handle the request completely
-        await transport.handleRequest(req, res, body);
+        await transport!.handleRequest(req, res, body);
         
       } else if (req.method === "GET" || req.method === "DELETE") {
-        if (!transport) {
+        if (!transport && !config.mcpHttpStateless) {
           res.writeHead(404, { "Content-Type": "application/json" });
           res.end(JSON.stringify({
             jsonrpc: "2.0",
@@ -240,10 +315,18 @@ export async function startHttpTransport(
             id: null,
           }));
           return;
+        } else if (!transport && config.mcpHttpStateless) {
+          // In stateless mode, create transport if it doesn't exist
+          transport = new StreamableHTTPServerTransport({
+            sessionIdGenerator: undefined,
+          });
+          httpTransports["stateless"] = transport;
+          const mcpServer = await createServerInstanceFn();
+          await mcpServer.connect(transport);
         }
 
         // Let MCP transport handle the request completely
-        await transport.handleRequest(req, res);
+        await transport!.handleRequest(req, res);
         
       } else {
         res.writeHead(405);

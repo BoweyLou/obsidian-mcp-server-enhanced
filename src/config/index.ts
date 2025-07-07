@@ -71,6 +71,10 @@ const EnvSchema = z.object({
   MCP_TRANSPORT_TYPE: z.enum(["stdio", "http"]).default("http"),
   MCP_HTTP_PORT: z.coerce.number().int().positive().default(3010),
   MCP_HTTP_HOST: z.string().default("127.0.0.1"),
+  MCP_HTTP_STATELESS: z
+    .string()
+    .transform((val) => val.toLowerCase() === "true")
+    .default("false"),
   MCP_ALLOWED_ORIGINS: z.string().optional(),
   MCP_AUTH_MODE: z.enum(["jwt", "oauth"]).optional(),
   MCP_AUTH_SECRET_KEY: z
@@ -200,6 +204,7 @@ export const config = {
   mcpTransportType: env.MCP_TRANSPORT_TYPE,
   mcpHttpPort: env.MCP_HTTP_PORT,
   mcpHttpHost: env.MCP_HTTP_HOST,
+  mcpHttpStateless: env.MCP_HTTP_STATELESS,
   mcpAllowedOrigins: env.MCP_ALLOWED_ORIGINS?.split(",")
     .map((origin) => origin.trim())
     .filter(Boolean),
