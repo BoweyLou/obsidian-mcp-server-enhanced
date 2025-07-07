@@ -19,7 +19,8 @@ Built on the [`cyanheads/mcp-ts-template`](https://github.com/cyanheads/mcp-ts-t
 
 ### 🌐 **Claude.ai Remote Integration**
 Perfect integration with Claude.ai's Remote MCP feature:
-- **Native HTTP Transport**: Rebuilt transport layer for Claude.ai compatibility
+- **Stateless HTTP Mode**: Dedicated stateless transport for Claude.ai compatibility (`MCP_HTTP_STATELESS=true`)
+- **Session-Based Mode**: Traditional session management for other MCP clients
 - **Simple API Key Authentication**: Uses your Obsidian API key in the external URL
 - **Zero Configuration**: Works out-of-the-box with Claude.ai Remote MCP servers
 - **Production Ready**: Enterprise-grade stability and error handling
@@ -37,6 +38,14 @@ Advanced querying capabilities beyond the original:
 - **Advanced Date Parsing**: Natural language date recognition
 - **Priority Detection**: Visual and text-based priority parsing
 - **Multiple Output Formats**: Table, list, and summary views
+
+### 🔧 **Production Monitoring & Reliability**
+Enterprise-grade monitoring and auto-restart capabilities:
+- **Health Check Script**: Comprehensive component validation (`scripts/health-check.sh`)
+- **Intelligent Monitoring**: Auto-restart with process lifecycle management (`scripts/monitor-mcp.sh`)
+- **macOS Auto-Start**: Launch agent configuration for system startup (`scripts/setup-autostart.sh`)
+- **Dynamic Port Management**: Automatic port conflict resolution (3010-3013 range)
+- **Enhanced Logging**: Detailed connection debugging and API key validation
 
 
 ## 🚀 Core Capabilities: Obsidian Tools 🛠️
@@ -147,6 +156,7 @@ If running directly, they can be set in a `.env` file in the project root or dir
 | `MCP_TRANSPORT_TYPE`                  | Server transport: `stdio` or `http`.                      | No                | `http`                   |
 | `MCP_HTTP_PORT`                       | Port for the HTTP server.                                 | No                | `3010`                   |
 | `MCP_HTTP_HOST`                       | Host for the HTTP server.                                 | No                | `127.0.0.1`              |
+| `MCP_HTTP_STATELESS`                  | Enable stateless mode for Claude.ai compatibility.        | No                | `false`                  |
 | `MCP_ALLOWED_ORIGINS`                 | Comma-separated origins for CORS. **Set for production.** | No                | (none)                   |
 | `MCP_AUTH_SECRET_KEY`                 | 32+ char secret for JWT auth. **Not used in this version.** | No                | `undefined`              |
 | `MCP_LOG_LEVEL`                       | Logging level (`debug`, `info`, `error`, etc.).           | No                | `info`                   |
