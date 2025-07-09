@@ -36,39 +36,55 @@ export const registerObsidianTaskQueryTool = async (
   obsidianService: ObsidianRestApiService,
 ): Promise<void> => {
   const toolName = "obsidian_task_query";
-  const toolDescription = `Search and analyze tasks across your Obsidian vault with powerful filtering and formatting options.
+  const toolDescription = `Enhanced search and analysis of tasks across your Obsidian vault with full Obsidian Tasks plugin support.
 
-This tool provides comprehensive task management capabilities by parsing markdown checkboxes and extracting task metadata.
+This tool provides comprehensive task management with complete Obsidian Tasks plugin compatibility, advanced filtering, and intelligent sorting.
 
-**Features:**
-- Query tasks by status: incomplete (⏳), completed (✅), in-progress (🔄), cancelled (❌)
-- Filter by date ranges: today, this week, this month, etc.
-- Search within specific folders or by tags
-- Extract task metadata: priorities, due dates, projects
-- Multiple output formats: list, table, summary
-- Support for various task formats and priority indicators
+**Enhanced Features:**
+- Full Obsidian Tasks plugin format support
+- Intelligent Dataview integration for efficient discovery
+- Advanced task hierarchy and subtask parsing
+- Urgency scoring based on priority + due date proximity
+- Enhanced date range filtering with smart date selection
 
 **Task Status Support:**
 - \`- [ ]\` Incomplete tasks
 - \`- [x]\` Completed tasks  
 - \`- [/]\` In-progress tasks
 - \`- [-]\` Cancelled tasks
+- \`- [>]\` Deferred tasks
+- \`- [<]\` Scheduled tasks
 
-**Priority Indicators:**
-- 🔴 or \`!!!\` for high priority
-- 🟡 or \`!!\` for medium priority  
-- 🟢 or \`!\` for low priority
+**Priority Support (Obsidian Tasks Plugin):**
+- 🔺 or ⏫ for highest priority
+- 🔴, ‼️, ❗, 🚨, ⬆️ for high priority
+- 🟡, 🟠, ➡️ for medium priority  
+- 🔵, 🟢, ⬇️, 🔽 for low priority
+- 🔻 or ⏬ for lowest priority
 
-**Date Formats:**
-- \`📅 2024-06-19\` or \`due: 2024-06-19\` for due dates
-- \`@due(2024-06-19)\` alternative format
+**Date Format Support:**
+- \`📅 2024-06-19\` Due dates
+- \`⏳ 2024-06-19\` Scheduled dates
+- \`🛫 2024-06-19\` Start dates
+- \`✅ 2024-06-19\` Completion dates
+- \`➕ 2024-06-19\` Created dates
+- \`🔁 every week\` Recurring tasks
+
+**Enhanced Date Ranges:**
+- today, yesterday, tomorrow
+- this-week, next-week, last-week
+- this-month, next-month, last-month
+- overdue, upcoming, all-time
 
 **Examples:**
 - Find all incomplete tasks: status="incomplete"
 - Today's tasks: dateRange="today"
-- High priority tasks: priority="high" 
+- Overdue tasks: dateRange="overdue"
+- High priority tasks: priority="high" or priority="highest"
 - Tasks in specific folder: folder="Projects/Active"
-- Summary view: format="summary"`;
+- Tasks with specific tags: tags=["urgent", "work"]
+- Summary view: format="summary"
+- Detailed analysis: format="table"`;
 
   // Create context for registration process
   const registrationContext: RequestContext =

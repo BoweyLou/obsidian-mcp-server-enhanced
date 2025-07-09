@@ -169,4 +169,5 @@ mcp-config.json
 # Generated Documentation
 docs/api/
 
-logs/
+logs/*.pid
+test-*.js

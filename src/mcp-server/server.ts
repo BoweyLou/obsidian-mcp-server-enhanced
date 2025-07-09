@@ -35,6 +35,8 @@ import { registerObsidianManageFrontmatterTool } from "./tools/obsidianManageFro
 import { registerObsidianManageTagsTool } from "./tools/obsidianManageTagsTool/index.js";
 import { registerObsidianDataviewQueryTool } from "./tools/obsidianDataviewQueryTool/index.js";
 import { registerObsidianTaskQueryTool } from "./tools/obsidianTaskQueryTool/index.js";
+import { registerObsidianCreateTaskTool } from "./tools/obsidianCreateTaskTool/index.js";
+import { registerObsidianUpdateTaskTool } from "./tools/obsidianUpdateTaskTool/index.js";
 import { registerObsidianPeriodicNotesTool } from "./tools/obsidianPeriodicNotesTool/index.js";
 import { registerObsidianBlockReferenceTool } from "./tools/obsidianBlockReferenceTool/index.js";
 import { registerObsidianGraphAnalysisTool } from "./tools/obsidianGraphAnalysisTool/index.js";
@@ -150,6 +152,8 @@ async function createMcpServerInstance(
     );
     await registerObsidianDataviewQueryTool(server, obsidianService);
     await registerObsidianTaskQueryTool(server, obsidianService);
+    await registerObsidianCreateTaskTool(server, obsidianService);
+    await registerObsidianUpdateTaskTool(server, obsidianService);
     await registerObsidianPeriodicNotesTool(server, obsidianService);
     await registerObsidianBlockReferenceTool(server, obsidianService);
     await registerObsidianGraphAnalysisTool(server, obsidianService);
