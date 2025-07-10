@@ -63,13 +63,13 @@ function setCorsHeaders(res: http.ServerResponse) {
 
 /**
  * Validates the API key from URL query parameter.
- * Claude.ai will connect with: http://127.0.0.1:3010/mcp?api_key=YOUR_API_KEY
+ * Claude.ai will connect with: http://127.0.0.1:3010/mcp?api_key=YOUR_MCP_AUTH_KEY
  */
 function validateApiKey(req: http.IncomingMessage, url: URL): boolean {
-  // Use the Obsidian API key for MCP authentication
-  // If no Obsidian API key is configured, skip authentication
-  if (!config.obsidianApiKey || config.obsidianApiKey === "dummy") {
-    logger.debug("API key validation skipped - no key configured");
+  // Use the MCP authentication key for MCP authentication
+  // If no MCP auth key is configured, skip authentication
+  if (!config.mcpAuthKey || config.mcpAuthKey === "dummy") {
+    logger.debug("API key validation skipped - no MCP auth key configured");
     return true;
   }
 
@@ -79,17 +79,17 @@ function validateApiKey(req: http.IncomingMessage, url: URL): boolean {
   const validationContext = requestContextService.createRequestContext({
     operation: "ApiKeyValidation",
     hasApiKeyInQuery: !!apiKeyFromQuery,
-    apiKeyMatches: apiKeyFromQuery === config.obsidianApiKey,
+    apiKeyMatches: apiKeyFromQuery === config.mcpAuthKey,
     queryParams: Array.from(url.searchParams.keys()),
     apiKeyLength: apiKeyFromQuery?.length || 0,
-    configKeyLength: config.obsidianApiKey.length,
+    configKeyLength: config.mcpAuthKey.length,
     // Show first/last 4 chars of keys for debugging
     apiKeyPreview: apiKeyFromQuery ? `${apiKeyFromQuery.substring(0, 4)}...${apiKeyFromQuery.substring(apiKeyFromQuery.length - 4)}` : "none",
-    configKeyPreview: `${config.obsidianApiKey.substring(0, 4)}...${config.obsidianApiKey.substring(config.obsidianApiKey.length - 4)}`,
+    configKeyPreview: `${config.mcpAuthKey.substring(0, 4)}...${config.mcpAuthKey.substring(config.mcpAuthKey.length - 4)}`,
   });
   logger.debug("API key validation", validationContext);
   
-  if (apiKeyFromQuery && apiKeyFromQuery === config.obsidianApiKey) {
+  if (apiKeyFromQuery && apiKeyFromQuery === config.mcpAuthKey) {
     return true;
   }
 

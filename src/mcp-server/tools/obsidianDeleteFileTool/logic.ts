@@ -4,6 +4,7 @@ import {
   ObsidianRestApiService,
   VaultCacheService,
 } from "../../../services/obsidianRestAPI/index.js";
+import { VaultManager } from "../../../services/vaultManager/index.js";
 import { BaseErrorCode, McpError } from "../../../types-global/errors.js";
 import {
   logger,
@@ -31,6 +32,15 @@ export const ObsidianDeleteFileInputSchema = z
       .min(1, "filePath cannot be empty")
       .describe(
         'The vault-relative path to the file to be deleted (e.g., "archive/old-file.md"). Tries case-sensitive first, then case-insensitive fallback.',
+      ),
+    /**
+     * The ID of the vault to delete from. If not specified, uses the default vault.
+     */
+    vault: z
+      .string()
+      .optional()
+      .describe(
+        'The ID of the vault to delete from (e.g., "personal", "work"). If not specified, uses the default vault.',
       ),
   })
   .describe(
@@ -74,7 +84,7 @@ export interface ObsidianDeleteFileResponse {
  *
  * @param {ObsidianDeleteFileInput} params - The validated input parameters.
  * @param {RequestContext} context - The request context for logging and correlation.
- * @param {ObsidianRestApiService} obsidianService - An instance of the Obsidian REST API service.
+ * @param {VaultManager} vaultManager - The VaultManager instance for multi-vault support.
  * @returns {Promise<ObsidianDeleteFileResponse>} A promise resolving to the structured success response
  *   containing a confirmation message.
  * @throws {McpError} Throws an McpError if the file cannot be found (even with fallback),
@@ -83,15 +93,23 @@ export interface ObsidianDeleteFileResponse {
 export const processObsidianDeleteFile = async (
   params: ObsidianDeleteFileInput,
   context: RequestContext,
-  obsidianService: ObsidianRestApiService,
-  vaultCacheService: VaultCacheService | undefined,
+  vaultManager: VaultManager,
 ): Promise<ObsidianDeleteFileResponse> => {
-  const { filePath: originalFilePath } = params;
+  const { filePath: originalFilePath, vault: vaultId } = params;
+
+  // Get the appropriate services for the specified vault
+  const obsidianService = vaultManager.getVaultService(vaultId, context);
+  const vaultCacheService = vaultManager.getVaultCacheService(vaultId, context);
+  const vaultConfig = vaultManager.getVaultConfig(vaultId);
   let effectiveFilePath = originalFilePath; // Track the path actually used for deletion
 
   logger.debug(
     `Processing obsidian_delete_file request for path: ${originalFilePath}`,
-    context,
+    {
+      ...context,
+      vaultId: vaultConfig.id,
+      vaultName: vaultConfig.name,
+    },
   );
 
   const shouldRetryNotFound = (err: unknown) =>

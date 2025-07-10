@@ -10,6 +10,7 @@ import { logger, McpLogLevel } from "./utils/internal/logger.js"; // Import logg
 // Import Services
 import { ObsidianRestApiService } from "./services/obsidianRestAPI/index.js";
 import { VaultCacheService } from "./services/obsidianRestAPI/vaultCache/index.js"; // Import VaultCacheService
+import { VaultManager } from "./services/vaultManager/index.js"; // Import VaultManager
 
 /**
  * The main MCP server instance (only stored globally for stdio shutdown).
@@ -22,15 +23,20 @@ let server: McpServer | undefined;
  */
 let httpServerInstance: http.Server | undefined;
 /**
- * Shared Obsidian REST API service instance.
+ * Shared Obsidian REST API service instance (legacy - for backwards compatibility).
  * @type {ObsidianRestApiService | undefined}
  */
 let obsidianService: ObsidianRestApiService | undefined;
 /**
- * Shared Vault Cache service instance.
+ * Shared Vault Cache service instance (legacy - for backwards compatibility).
  * @type {VaultCacheService | undefined}
  */
 let vaultCacheService: VaultCacheService | undefined;
+/**
+ * Shared VaultManager instance for multi-vault support.
+ * @type {VaultManager | undefined}
+ */
+let vaultManager: VaultManager | undefined;
 
 /**
  * Gracefully shuts down the main MCP server.
@@ -51,7 +57,18 @@ const shutdown = async (signal: string) => {
   );
 
   try {
-    // Stop cache refresh timer first
+    // Stop cache refresh timers for all vaults
+    if (config.obsidianEnableCache && vaultManager) {
+      // Stop periodic refresh for all vault cache services
+      for (const vaultId of vaultManager.getAvailableVaults()) {
+        const cacheService = vaultManager.getVaultCacheService(vaultId);
+        if (cacheService) {
+          cacheService.stopPeriodicRefresh();
+        }
+      }
+    }
+    
+    // Legacy: Stop single vault cache refresh timer (for backwards compatibility)
     if (config.obsidianEnableCache && vaultCacheService) {
       vaultCacheService.stopPeriodicRefresh();
     }
@@ -173,29 +190,26 @@ const start = async () => {
   );
 
   try {
-    // --- Instantiate Shared Services ---
-    logger.debug("Instantiating shared services...", startupContext);
-    obsidianService = new ObsidianRestApiService(); // Instantiate Obsidian Service
+    // --- Instantiate VaultManager ---
+    logger.debug("Instantiating VaultManager for multi-vault support...", startupContext);
+    vaultManager = new VaultManager(); // Instantiate VaultManager (handles all vault services)
 
-    // --- Perform Initial Obsidian API Status Check ---
+    // --- Perform Initial Obsidian API Status Check for Default Vault ---
     try {
       logger.info(
-        "Performing initial Obsidian API status check with retries...",
+        "Performing initial Obsidian API status check for default vault with retries...",
         startupContext,
       );
 
+      const defaultVaultService = vaultManager.getVaultService(); // Get default vault service
       const status = await retryWithDelay(
         async () => {
-          if (!obsidianService) {
-            // This case should not happen in practice, but it satisfies the type checker.
-            throw new Error("Obsidian service not initialized.");
-          }
           const checkStatusContext = {
             ...startupContext,
             operation: "checkStatusAttempt",
           };
           const currentStatus =
-            await obsidianService.checkStatus(checkStatusContext);
+            await defaultVaultService.checkStatus(checkStatusContext);
           if (
             currentStatus?.service !== "Obsidian Local REST API" ||
             !currentStatus?.authenticated
@@ -217,14 +231,14 @@ const start = async () => {
         },
       );
 
-      logger.info("Obsidian API status check successful.", {
+      logger.info("Obsidian API status check successful for default vault.", {
         ...startupContext,
         obsidianVersion: status.versions.obsidian,
         pluginVersion: status.versions.self,
       });
     } catch (statusError) {
       logger.error(
-        "Critical error during initial Obsidian API status check after multiple retries. Check OBSIDIAN_BASE_URL, OBSIDIAN_API_KEY, and plugin status.",
+        "Critical error during initial Obsidian API status check after multiple retries. Check vault configurations, OBSIDIAN_BASE_URL, OBSIDIAN_API_KEY, and plugin status.",
         {
           ...startupContext,
           error:
@@ -239,16 +253,13 @@ const start = async () => {
     }
     // --- End Status Check ---
 
-    if (config.obsidianEnableCache) {
-      vaultCacheService = new VaultCacheService(obsidianService); // Instantiate Cache Service, passing Obsidian Service
-      logger.info(
-        "Vault cache is enabled and service is instantiated.",
-        startupContext,
-      );
-    } else {
-      logger.info("Vault cache is disabled by configuration.", startupContext);
+    // Set up legacy services for backwards compatibility
+    if (!config.isMultiVaultMode) {
+      obsidianService = vaultManager.getVaultService(); // Get default vault service
+      vaultCacheService = vaultManager.getVaultCacheService(); // Get default cache service
     }
-    logger.info("Shared services instantiated.", startupContext);
+
+    logger.info("VaultManager instantiated successfully.", startupContext);
     // --- End Service Instantiation ---
 
     // Initialize the server instance and start the selected transport
@@ -257,12 +268,11 @@ const start = async () => {
       startupContext,
     );
 
-    // Start the server transport. Services are instantiated here and passed down.
+    // Start the server transport. VaultManager is passed down for multi-vault support.
     // For stdio, this returns the McpServer instance.
     // For http, it returns the http.Server instance.
     const serverOrHttpInstance = await initializeAndStartServer(
-      obsidianService,
-      vaultCacheService,
+      vaultManager,
     );
 
     if (

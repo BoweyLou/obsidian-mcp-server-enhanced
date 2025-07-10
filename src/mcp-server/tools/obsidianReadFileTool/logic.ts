@@ -4,6 +4,7 @@ import {
   NoteJson,
   ObsidianRestApiService,
 } from "../../../services/obsidianRestAPI/index.js";
+import { VaultManager } from "../../../services/vaultManager/index.js";
 import { BaseErrorCode, McpError } from "../../../types-global/errors.js";
 import {
   createFormattedStatWithTokenCount,
@@ -43,6 +44,15 @@ export const ObsidianReadFileInputSchema = z
       .min(1, "filePath cannot be empty")
       .describe(
         'The vault-relative path to the target file (e.g., "developer/github/tips.md"). Tries case-sensitive first, then case-insensitive fallback.',
+      ),
+    /**
+     * The ID of the vault to read from. If not specified, uses the default vault.
+     */
+    vault: z
+      .string()
+      .optional()
+      .describe(
+        'The ID of the vault to read from (e.g., "personal", "work"). If not specified, uses the default vault.',
       ),
     /**
      * Specifies the desired format for the returned content.
@@ -126,7 +136,7 @@ export interface ObsidianReadFileResponse {
  *
  * @param {ObsidianReadFileInput} params - The validated input parameters.
  * @param {RequestContext} context - The request context for logging and correlation.
- * @param {ObsidianRestApiService} obsidianService - An instance of the Obsidian REST API service.
+ * @param {VaultManager} vaultManager - The VaultManager instance for multi-vault support.
  * @returns {Promise<ObsidianReadFileResponse>} A promise resolving to the structured success response
  *   containing the file content and optionally formatted statistics.
  * @throws {McpError} Throws an McpError if the file cannot be found (even with fallback),
@@ -135,18 +145,29 @@ export interface ObsidianReadFileResponse {
 export const processObsidianReadFile = async (
   params: ObsidianReadFileInput,
   context: RequestContext,
-  obsidianService: ObsidianRestApiService,
+  vaultManager: VaultManager,
 ): Promise<ObsidianReadFileResponse> => {
   const {
     filePath: originalFilePath,
     format: requestedFormat,
     includeStat,
+    vault: vaultId,
   } = params;
   let effectiveFilePath = originalFilePath; // Track the actual path used (might change during fallback)
 
+  // Get the appropriate Obsidian service for the specified vault
+  const obsidianService = vaultManager.getVaultService(vaultId, context);
+  const vaultConfig = vaultManager.getVaultConfig(vaultId);
+
   logger.debug(
     `Processing obsidian_read_file request for path: ${originalFilePath}`,
-    { ...context, format: requestedFormat, includeStat },
+    { 
+      ...context, 
+      format: requestedFormat, 
+      includeStat,
+      vaultId: vaultConfig.id,
+      vaultName: vaultConfig.name,
+    },
   );
 
   const shouldRetryNotFound = (err: unknown) =>

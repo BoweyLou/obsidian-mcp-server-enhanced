@@ -8,6 +8,7 @@
 import path from "node:path";
 import { z } from "zod";
 import { ObsidianRestApiService } from "../../../services/obsidianRestAPI/index.js";
+import { VaultManager } from "../../../services/vaultManager/index.js";
 import { BaseErrorCode, McpError } from "../../../types-global/errors.js";
 import {
   logger,
@@ -32,6 +33,15 @@ export const ObsidianListFilesInputSchema = z
       .string()
       .describe(
         'The vault-relative path to the directory to list (e.g., "developer/atlas-mcp-server", "/" for root). Case-sensitive.',
+      ),
+    /**
+     * The ID of the vault to list files from. If not specified, uses the default vault.
+     */
+    vault: z
+      .string()
+      .optional()
+      .describe(
+        'The ID of the vault to list files from (e.g., "personal", "work"). If not specified, uses the default vault.',
       ),
     /**
      * Optional array of file extensions (including the leading dot) to filter the results.
@@ -240,21 +250,30 @@ async function buildFileTree(
  *
  * @param {ObsidianListFilesInput} params - The validated input parameters.
  * @param {RequestContext} context - The request context for logging and correlation.
- * @param {ObsidianRestApiService} obsidianService - An instance of the Obsidian REST API service.
+ * @param {VaultManager} vaultManager - The VaultManager instance for multi-vault support.
  * @returns {Promise<ObsidianListFilesResponse>} A promise resolving to the structured success response.
  * @throws {McpError} Throws an McpError if the initial directory is not found or another error occurs.
  */
 export const processObsidianListFiles = async (
   params: ObsidianListFilesInput,
   context: RequestContext,
-  obsidianService: ObsidianRestApiService,
+  vaultManager: VaultManager,
 ): Promise<ObsidianListFilesResponse> => {
-  const { dirPath } = params;
+  const { dirPath, vault: vaultId } = params;
+
+  // Get the appropriate Obsidian service for the specified vault
+  const obsidianService = vaultManager.getVaultService(vaultId, context);
+  const vaultConfig = vaultManager.getVaultConfig(vaultId);
   const dirPathForLog = dirPath === "" || dirPath === "/" ? "/" : dirPath;
 
   logger.debug(
     `Processing obsidian_list_files request for path: ${dirPathForLog}`,
-    { ...context, params },
+    { 
+      ...context, 
+      params,
+      vaultId: vaultConfig.id,
+      vaultName: vaultConfig.name,
+    },
   );
 
   try {

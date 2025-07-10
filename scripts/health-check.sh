@@ -35,14 +35,39 @@ else
     echo -e "   ${RED}✗ Local endpoint is NOT responding${NC}"
 fi
 
-# 3. Check Obsidian API
+# 3. Check Obsidian APIs
 echo ""
-echo "3. Checking Obsidian REST API..."
-if curl -s -f -H "Authorization: Bearer ${OBSIDIAN_API_KEY}" http://127.0.0.1:27123/vault/ > /dev/null 2>&1; then
-    echo -e "   ${GREEN}✓ Obsidian API is accessible${NC}"
+echo "3. Checking Obsidian REST APIs..."
+
+# Check if we're in multi-vault mode
+if [ ! -z "$OBSIDIAN_VAULTS" ]; then
+    echo "   Multi-vault mode detected"
+    
+    # Parse vault configs and check each one
+    # Extract work vault (port 27123)
+    WORK_API_KEY=$(echo "$OBSIDIAN_VAULTS" | grep -o '"apiKey":"[^"]*' | head -1 | cut -d'"' -f4)
+    if curl -s -f -H "Authorization: Bearer ${WORK_API_KEY}" http://127.0.0.1:27123/vault/ > /dev/null 2>&1; then
+        echo -e "   ${GREEN}✓ Work Vault API (port 27123) is accessible${NC}"
+    else
+        echo -e "   ${RED}✗ Work Vault API (port 27123) is NOT accessible${NC}"
+    fi
+    
+    # Extract life vault (port 27122)
+    LIFE_API_KEY=$(echo "$OBSIDIAN_VAULTS" | grep -o '"apiKey":"[^"]*' | tail -1 | cut -d'"' -f4)
+    if curl -s -f -H "Authorization: Bearer ${LIFE_API_KEY}" http://127.0.0.1:27122/vault/ > /dev/null 2>&1; then
+        echo -e "   ${GREEN}✓ Life Vault API (port 27122) is accessible${NC}"
+    else
+        echo -e "   ${RED}✗ Life Vault API (port 27122) is NOT accessible${NC}"
+    fi
 else
-    echo -e "   ${RED}✗ Obsidian API is NOT accessible${NC}"
-    echo "   Check: Is Obsidian running? Is Local REST API plugin enabled?"
+    # Legacy single-vault mode
+    echo "   Single-vault mode (legacy)"
+    if curl -s -f -H "Authorization: Bearer ${OBSIDIAN_API_KEY}" http://127.0.0.1:27123/vault/ > /dev/null 2>&1; then
+        echo -e "   ${GREEN}✓ Obsidian API is accessible${NC}"
+    else
+        echo -e "   ${RED}✗ Obsidian API is NOT accessible${NC}"
+        echo "   Check: Is Obsidian running? Is Local REST API plugin enabled?"
+    fi
 fi
 
 # 4. Check Tailscale Status
@@ -71,12 +96,12 @@ if ps aux | grep -E "tailscale.*funnel.*3010" | grep -v grep > /dev/null; then
             echo -e "   ${GREEN}✓ Funnel endpoint is accessible${NC}"
             echo ""
             echo -e "   ${GREEN}🎉 Your Claude.ai Remote MCP URL:${NC}"
-            echo "   $FUNNEL_URL?api_key=$OBSIDIAN_API_KEY"
+            echo "   $FUNNEL_URL?api_key=$MCP_AUTH_KEY"
         else
             echo -e "   ${YELLOW}⚠ Funnel endpoint returned an error (this might be normal)${NC}"
             echo ""
             echo "   Your Claude.ai Remote MCP URL should be:"
-            echo "   $FUNNEL_URL?api_key=$OBSIDIAN_API_KEY"
+            echo "   $FUNNEL_URL?api_key=$MCP_AUTH_KEY"
         fi
     fi
 else

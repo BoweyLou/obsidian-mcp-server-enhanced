@@ -1,8 +1,5 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import {
-  ObsidianRestApiService,
-  VaultCacheService,
-} from "../../../services/obsidianRestAPI/index.js";
+import { VaultManager } from "../../../services/vaultManager/index.js";
 import { BaseErrorCode, McpError } from "../../../types-global/errors.js";
 import {
   ErrorHandler,
@@ -38,13 +35,12 @@ import {
  */
 export const registerObsidianDeleteFileTool = async (
   server: McpServer,
-  obsidianService: ObsidianRestApiService,
-  vaultCacheService: VaultCacheService | undefined,
+  vaultManager: VaultManager,
 ): Promise<void> => {
   const toolName = "obsidian_delete_file";
   // Updated description to accurately reflect the response (no timestamp)
   const toolDescription =
-    "Permanently deletes a specified file from the Obsidian vault. Tries the exact path first, then attempts a case-insensitive fallback if the file is not found. Requires the vault-relative path including the file extension. Returns a success message.";
+    "Permanently deletes a specified file from the Obsidian vault. Supports multi-vault setups - specify 'vault' parameter to target a specific vault, or omit for default vault. Tries the exact path first, then attempts a case-insensitive fallback if the file is not found. Requires the vault-relative path including the file extension. Returns a success message.";
 
   // Create a context specifically for the registration process.
   const registrationContext: RequestContext =
@@ -93,8 +89,7 @@ export const registerObsidianDeleteFileTool = async (
                 await processObsidianDeleteFile(
                   params,
                   handlerContext,
-                  obsidianService,
-                  vaultCacheService,
+                  vaultManager,
                 );
               logger.debug(
                 `'${toolName}' processed successfully`,

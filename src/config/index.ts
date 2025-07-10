@@ -59,6 +59,23 @@ try {
 }
 
 /**
+ * Zod schema for individual vault configuration.
+ * @private
+ */
+const VaultConfigSchema = z.object({
+  id: z.string().min(1, "Vault ID cannot be empty"),
+  name: z.string().min(1, "Vault name cannot be empty"),
+  apiKey: z.string().min(1, "Vault API key cannot be empty"),
+  baseUrl: z.string().url("Vault base URL must be a valid URL"),
+  verifySsl: z.boolean().default(false),
+});
+
+/**
+ * Type for individual vault configuration.
+ */
+export type VaultConfig = z.infer<typeof VaultConfigSchema>;
+
+/**
  * Zod schema for validating environment variables.
  * @private
  */
@@ -87,8 +104,12 @@ const EnvSchema = z.object({
   OAUTH_ISSUER_URL: z.string().url().optional(),
   OAUTH_AUDIENCE: z.string().optional(),
   OAUTH_JWKS_URI: z.string().url().optional(),
-  // --- Obsidian Specific Config ---
-  OBSIDIAN_API_KEY: z.string().min(1, "OBSIDIAN_API_KEY cannot be empty"),
+  // --- MCP Authentication (for multi-vault support) ---
+  MCP_AUTH_KEY: z.string().min(1, "MCP_AUTH_KEY cannot be empty").optional(),
+  // --- Multi-vault configuration ---
+  OBSIDIAN_VAULTS: z.string().optional(), // JSON string of vault configurations
+  // --- Legacy single vault config (for backwards compatibility) ---
+  OBSIDIAN_API_KEY: z.string().min(1, "OBSIDIAN_API_KEY cannot be empty").optional(),
   OBSIDIAN_BASE_URL: z.string().url().default("http://127.0.0.1:27123"),
   OBSIDIAN_VERIFY_SSL: z
     .string()
@@ -123,6 +144,73 @@ if (!parsedEnv.success) {
 }
 
 const env = parsedEnv.data;
+
+// Parse vault configurations
+let vaultConfigs: Array<{
+  id: string;
+  name: string;
+  apiKey: string;
+  baseUrl: string;
+  verifySsl: boolean;
+}> = [];
+
+let mcpAuthKey: string | undefined;
+let isMultiVaultMode = false;
+
+if (env.OBSIDIAN_VAULTS) {
+  // Multi-vault mode
+  try {
+    const vaultsJson = JSON.parse(env.OBSIDIAN_VAULTS);
+    if (!Array.isArray(vaultsJson)) {
+      throw new Error("OBSIDIAN_VAULTS must be an array");
+    }
+    
+    vaultConfigs = vaultsJson.map((vault, index) => {
+      const parsed = VaultConfigSchema.safeParse(vault);
+      if (!parsed.success) {
+        throw new Error(`Invalid vault configuration at index ${index}: ${JSON.stringify(parsed.error.flatten().fieldErrors)}`);
+      }
+      return parsed.data;
+    });
+    
+    if (vaultConfigs.length === 0) {
+      throw new Error("OBSIDIAN_VAULTS array cannot be empty");
+    }
+    
+    // Check for duplicate vault IDs
+    const vaultIds = vaultConfigs.map(v => v.id);
+    const duplicates = vaultIds.filter((id, index) => vaultIds.indexOf(id) !== index);
+    if (duplicates.length > 0) {
+      throw new Error(`Duplicate vault IDs found: ${duplicates.join(", ")}`);
+    }
+    
+    if (!env.MCP_AUTH_KEY) {
+      throw new Error("MCP_AUTH_KEY is required when using multi-vault mode (OBSIDIAN_VAULTS)");
+    }
+    
+    mcpAuthKey = env.MCP_AUTH_KEY;
+    isMultiVaultMode = true;
+  } catch (error) {
+    if (process.stderr.isTTY) {
+      console.error("❌ Error parsing OBSIDIAN_VAULTS:", error);
+    }
+    throw new Error(`Failed to parse OBSIDIAN_VAULTS: ${error instanceof Error ? error.message : String(error)}`);
+  }
+} else if (env.OBSIDIAN_API_KEY) {
+  // Legacy single vault mode
+  vaultConfigs = [{
+    id: "default",
+    name: "Default Vault",
+    apiKey: env.OBSIDIAN_API_KEY,
+    baseUrl: env.OBSIDIAN_BASE_URL,
+    verifySsl: env.OBSIDIAN_VERIFY_SSL,
+  }];
+  // In single vault mode, use the Obsidian API key for MCP auth unless MCP_AUTH_KEY is explicitly set
+  mcpAuthKey = env.MCP_AUTH_KEY || env.OBSIDIAN_API_KEY;
+  isMultiVaultMode = false;
+} else {
+  throw new Error("Either OBSIDIAN_VAULTS (multi-vault mode) or OBSIDIAN_API_KEY (single vault mode) must be configured");
+}
 
 // --- Directory Ensurance Function ---
 const ensureDirectory = (
@@ -213,6 +301,12 @@ export const config = {
   oauthIssuerUrl: env.OAUTH_ISSUER_URL,
   oauthAudience: env.OAUTH_AUDIENCE,
   oauthJwksUri: env.OAUTH_JWKS_URI,
+  // --- MCP Authentication ---
+  mcpAuthKey: mcpAuthKey!,
+  // --- Vault Configuration ---
+  vaultConfigs,
+  isMultiVaultMode,
+  // --- Legacy single vault properties (for backwards compatibility) ---
   obsidianApiKey: env.OBSIDIAN_API_KEY,
   obsidianBaseUrl: env.OBSIDIAN_BASE_URL,
   obsidianVerifySsl: env.OBSIDIAN_VERIFY_SSL,

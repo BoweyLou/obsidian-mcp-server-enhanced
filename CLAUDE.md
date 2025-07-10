@@ -53,9 +53,10 @@ When making changes or restarting the server:
 
 **Common Issues**:
 - **Port 3010 in use**: Check with `lsof -i :3010`, kill competing process
-- **API key errors**: Ensure `OBSIDIAN_API_KEY` environment variable is set
-- **Obsidian plugin not responding**: Verify Obsidian Local REST API plugin is running
+- **API key errors**: Ensure `MCP_AUTH_KEY` is set and vault API keys are correct in OBSIDIAN_VAULTS
+- **Obsidian plugin not responding**: Verify Obsidian Local REST API plugin is running on all configured ports
 - **Cache build failures**: Check `logs/error.log` for Obsidian API connectivity issues
+- **Multi-vault config errors**: Validate JSON syntax in OBSIDIAN_VAULTS environment variable
 
 **Server Health Checks**:
 - HTTP endpoint responding: `curl -s http://127.0.0.1:3010/mcp` returns auth error (good)
@@ -75,13 +76,13 @@ When making changes or restarting the server:
 
 2. **Ensure you're using the Tailscale URL, not localhost**:
    - ❌ Wrong: `http://127.0.0.1:3010/mcp`
-   - ✅ Correct: `https://your-device.your-tailnet.ts.net/mcp?api_key=YOUR_API_KEY`
+   - ✅ Correct: `https://your-device.your-tailnet.ts.net/mcp?api_key=YOUR_MCP_AUTH_KEY`
    
 3. **Get your correct Tailscale URL**:
    ```bash
    tailscale status --self --json | grep DNSName
    ```
-   Your URL format: `https://[DNSName without trailing dot]/mcp?api_key=[YOUR_API_KEY]`
+   Your URL format: `https://[DNSName without trailing dot]/mcp?api_key=[YOUR_MCP_AUTH_KEY]`
 
 4. **Verify Tailscale funnel is running**:
    ```bash
@@ -132,6 +133,7 @@ This is an enhanced MCP (Model Context Protocol) server that provides comprehens
 **Service Layer** (`src/services/`):
 - `ObsidianRestApiService`: Typed client for Obsidian Local REST API
 - `VaultCacheService`: Intelligent in-memory caching with periodic refresh
+- `VaultManager`: Manages multiple vault configurations and service instances
 - Provides resilience and performance optimization
 
 **Tool Architecture** (`src/mcp-server/tools/`):
@@ -143,9 +145,10 @@ Each tool follows a consistent pattern:
 ### Critical Service Dependencies
 
 **Obsidian API Requirements**:
-- Requires Obsidian Local REST API plugin installed and configured
-- Uses API key authentication (set via `OBSIDIAN_API_KEY`)
-- Performs startup health checks with retries
+- Requires Obsidian Local REST API plugin installed and configured on each vault
+- Uses API key authentication (individual keys per vault in multi-vault mode)
+- Performs startup health checks with retries for all configured vaults
+- Supports multiple Obsidian instances on different ports (27122, 27123, etc.)
 
 **Vault Cache Service**:
 - Enabled by default (`OBSIDIAN_ENABLE_CACHE=true`)
@@ -173,15 +176,71 @@ All configuration through environment variables in this priority order:
 3. Default values in `src/config/index.ts`
 
 Critical variables:
-- `OBSIDIAN_API_KEY`: Required API key from Obsidian plugin
-- `OBSIDIAN_BASE_URL`: Obsidian API endpoint (default: http://127.0.0.1:27123)
+- `MCP_AUTH_KEY`: Authentication key for Claude.ai Remote MCP access (generate with `openssl rand -hex 32`)
+- `OBSIDIAN_API_KEY`: Required API key from Obsidian plugin (single-vault mode only)
+- `OBSIDIAN_VAULTS`: JSON array of vault configurations (multi-vault mode)
+- `OBSIDIAN_BASE_URL`: Obsidian API endpoint (default: http://127.0.0.1:27123, single-vault mode only)
 - `MCP_TRANSPORT_TYPE`: stdio|http (default: http)
 - `MCP_HTTP_STATELESS`: true|false (default: false) - Enable stateless mode for Claude.ai compatibility
 
+### Multi-Vault Configuration
+
+The server supports both single-vault (legacy) and multi-vault modes:
+
+**Single-Vault Mode** (backwards compatible):
+```bash
+MCP_AUTH_KEY=your-generated-key-here
+OBSIDIAN_API_KEY=your-obsidian-plugin-api-key
+OBSIDIAN_BASE_URL=http://127.0.0.1:27123
+```
+
+**Multi-Vault Mode** (recommended):
+```bash
+MCP_AUTH_KEY=your-generated-key-here
+OBSIDIAN_VAULTS='[
+  {
+    "id": "work",
+    "name": "Work Vault", 
+    "apiKey": "work-vault-api-key",
+    "baseUrl": "http://127.0.0.1:27123",
+    "verifySsl": false
+  },
+  {
+    "id": "personal",
+    "name": "Personal Vault",
+    "apiKey": "personal-vault-api-key", 
+    "baseUrl": "http://127.0.0.1:27122",
+    "verifySsl": false
+  }
+]'
+```
+
+**Multi-Vault Setup Process**:
+1. **Generate MCP Auth Key**: `openssl rand -hex 32`
+2. **Configure multiple Obsidian instances** with Local REST API plugin on different ports
+3. **Get API keys** from each Obsidian instance's Local REST API plugin settings
+4. **Update .env** with OBSIDIAN_VAULTS configuration
+5. **Start server**: `npm run start:http`
+6. **Find Tailscale URL**: `tailscale status --self | grep "Funnel on"`
+7. **Use in Claude.ai**: `https://your-device.your-tailnet.ts.net/mcp?api_key=YOUR_MCP_AUTH_KEY`
+   - Example: `https://yannicks-mac-mini.tail9cf43d.ts.net/mcp?api_key=YOUR_MCP_AUTH_KEY`
+
+**Tool Usage with Multi-Vault**:
+- **Default vault**: Tool calls without `vault` parameter use the first configured vault
+- **Specific vault**: Add `vault` parameter to tool calls (e.g., `vault: "work"` or `vault: "personal"`)
+- **Backwards compatibility**: Single-vault configurations continue to work without changes
+
 ### Enhanced Features (This Fork)
 
+**Multi-Vault Support**:
+- Simultaneous access to multiple Obsidian vaults through a single MCP server
+- Vault-specific API keys and port configurations
+- Tool routing based on vault parameter in Claude.ai calls
+- VaultManager service for centralized vault configuration management
+- Backwards compatibility with single-vault setups
+
 **Claude.ai Remote Integration**:
-- Native HTTP transport with URL parameter authentication
+- Native HTTP transport with URL parameter authentication using MCP_AUTH_KEY
 - Stateless mode for reliable Claude.ai Remote MCP connections
 - Session-based mode for traditional MCP clients
 - Simplified setup for Claude.ai Remote MCP servers
@@ -215,6 +274,7 @@ Critical variables:
 ### Modifying Services
 - ObsidianRestApiService methods follow REST API endpoints exactly
 - VaultCacheService handles automatic cache invalidation
+- VaultManager provides vault selection logic and manages multiple service instances
 - Always use provided RequestContext for logging correlation
 
 ### Configuration Changes
@@ -230,8 +290,9 @@ Critical variables:
 - Log with appropriate levels: debug, info, warning, error, fatal
 
 ### Service Integration
-- Services are instantiated once in `src/index.ts` and passed down
-- Tools receive service instances via registration functions
+- VaultManager is instantiated once in `src/index.ts` and passed to tools
+- Tools use VaultManager.getVaultService(vaultId) to get appropriate service instance
+- Updated tools receive VaultManager, legacy tools receive default service instances
 - Always check cache readiness before using VaultCacheService
 
 ### Authentication & Security

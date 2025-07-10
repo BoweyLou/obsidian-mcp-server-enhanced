@@ -37,13 +37,16 @@ export class VaultCacheService {
   private isBuilding: boolean = false;
   private obsidianService: ObsidianRestApiService;
   private refreshIntervalId: NodeJS.Timeout | null = null;
+  private vaultId: string;
 
-  constructor(obsidianService: ObsidianRestApiService) {
+  constructor(obsidianService: ObsidianRestApiService, vaultId: string = "default") {
     this.obsidianService = obsidianService;
+    this.vaultId = vaultId;
     logger.info(
-      "VaultCacheService initialized.",
+      `VaultCacheService initialized for vault: ${this.vaultId}`,
       requestContextService.createRequestContext({
         operation: "VaultCacheServiceInit",
+        vaultId: this.vaultId,
       }),
     );
   }
@@ -60,6 +63,7 @@ export class VaultCacheService {
         "Periodic refresh is already running.",
         requestContextService.createRequestContext({
           operation: "startPeriodicRefresh",
+          vaultId: this.vaultId,
         }),
       );
       return;
@@ -72,6 +76,7 @@ export class VaultCacheService {
       `Vault cache periodic refresh scheduled every ${config.obsidianCacheRefreshIntervalMin} minutes.`,
       requestContextService.createRequestContext({
         operation: "startPeriodicRefresh",
+        vaultId: this.vaultId,
       }),
     );
   }
@@ -83,6 +88,7 @@ export class VaultCacheService {
   public stopPeriodicRefresh(): void {
     const context = requestContextService.createRequestContext({
       operation: "stopPeriodicRefresh",
+      vaultId: this.vaultId,
     });
     if (this.refreshIntervalId) {
       clearInterval(this.refreshIntervalId);

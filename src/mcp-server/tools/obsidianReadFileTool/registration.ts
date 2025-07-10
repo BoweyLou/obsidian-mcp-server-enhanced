@@ -1,5 +1,5 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { ObsidianRestApiService } from "../../../services/obsidianRestAPI/index.js";
+import { VaultManager } from "../../../services/vaultManager/index.js";
 import { BaseErrorCode, McpError } from "../../../types-global/errors.js";
 import {
   ErrorHandler,
@@ -29,18 +29,17 @@ import {
  * and optionally formatted file statistics (timestamps, token count).
  *
  * @param {McpServer} server - The MCP server instance to register the tool with.
- * @param {ObsidianRestApiService} obsidianService - An instance of the Obsidian REST API service
- *   used to interact with the user's Obsidian vault.
+ * @param {VaultManager} vaultManager - The VaultManager instance for multi-vault support.
  * @returns {Promise<void>} A promise that resolves when the tool registration is complete or rejects on error.
  * @throws {McpError} Throws an McpError if registration fails critically.
  */
 export const registerObsidianReadFileTool = async (
   server: McpServer,
-  obsidianService: ObsidianRestApiService, // Dependency injection for the Obsidian service
+  vaultManager: VaultManager, // Dependency injection for the VaultManager
 ): Promise<void> => {
   const toolName = "obsidian_read_file";
   const toolDescription =
-    "Retrieves the content and metadata of a specified file within the Obsidian vault. Tries the exact path first, then attempts a case-insensitive fallback. Returns an object containing the content (markdown string or full NoteJson object based on 'format'), and optionally formatted file stats ('stats' object with creationTime, modifiedTime, tokenCountEstimate). Use 'includeStat: true' with 'format: markdown' to include stats; stats are always included with 'format: json'.";
+    "Retrieves the content and metadata of a specified file within the Obsidian vault. Supports multi-vault setups - specify 'vault' parameter to target a specific vault, or omit for default vault. Tries the exact path first, then attempts a case-insensitive fallback. Returns an object containing the content (markdown string or full NoteJson object based on 'format'), and optionally formatted file stats ('stats' object with creationTime, modifiedTime, tokenCountEstimate). Use 'includeStat: true' with 'format: markdown' to include stats; stats are always included with 'format: json'.";
 
   // Create a context specifically for the registration process.
   const registrationContext: RequestContext =
@@ -92,13 +91,13 @@ export const registerObsidianReadFileTool = async (
           return await ErrorHandler.tryCatch(
             async () => {
               // Delegate the actual file reading logic to the dedicated processing function.
-              // Pass the (already shape-validated) parameters, context, and the Obsidian service.
+              // Pass the (already shape-validated) parameters, context, and the VaultManager.
               // The process function handles the refined validation internally if needed, but here shape = refined.
               const response: ObsidianReadFileResponse =
                 await processObsidianReadFile(
                   params, // Pass params directly as shape matches refined schema
                   handlerContext,
-                  obsidianService,
+                  vaultManager,
                 );
               logger.debug(
                 `'${toolName}' processed successfully`,

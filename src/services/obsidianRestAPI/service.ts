@@ -36,9 +36,19 @@ import {
 export class ObsidianRestApiService {
   private axiosInstance: AxiosInstance;
   private apiKey: string;
+  private baseUrl: string;
+  private verifySsl: boolean;
 
-  constructor() {
-    this.apiKey = config.obsidianApiKey; // Get from central config
+  constructor(
+    apiKey?: string,
+    baseUrl?: string,
+    verifySsl?: boolean,
+  ) {
+    // Support both legacy single-vault mode and new multi-vault mode
+    this.apiKey = apiKey || config.obsidianApiKey || "";
+    this.baseUrl = baseUrl || config.obsidianBaseUrl;
+    this.verifySsl = verifySsl !== undefined ? verifySsl : config.obsidianVerifySsl;
+
     if (!this.apiKey) {
       // Config validation should prevent this, but double-check
       throw new McpError(
@@ -49,11 +59,11 @@ export class ObsidianRestApiService {
     }
 
     const httpsAgent = new https.Agent({
-      rejectUnauthorized: config.obsidianVerifySsl,
+      rejectUnauthorized: this.verifySsl,
     });
 
     this.axiosInstance = axios.create({
-      baseURL: config.obsidianBaseUrl.replace(/\/$/, ""), // Remove trailing slash
+      baseURL: this.baseUrl.replace(/\/$/, ""), // Remove trailing slash
       headers: {
         Authorization: `Bearer ${this.apiKey}`,
         Accept: "application/json", // Default accept type
@@ -63,7 +73,7 @@ export class ObsidianRestApiService {
     });
 
     logger.info(
-      `ObsidianRestApiService initialized with base URL: ${this.axiosInstance.defaults.baseURL}, Verify SSL: ${config.obsidianVerifySsl}`,
+      `ObsidianRestApiService initialized with base URL: ${this.axiosInstance.defaults.baseURL}, Verify SSL: ${this.verifySsl}`,
       requestContextService.createRequestContext({
         operation: "ObsidianServiceInit",
       }),

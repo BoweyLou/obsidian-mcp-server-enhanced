@@ -6,7 +6,7 @@
  */
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { ObsidianRestApiService } from "../../../services/obsidianRestAPI/index.js";
+import { VaultManager } from "../../../services/vaultManager/index.js";
 import { BaseErrorCode, McpError } from "../../../types-global/errors.js";
 import {
   ErrorHandler,
@@ -40,11 +40,11 @@ import {
  */
 export const registerObsidianListFilesTool = async (
   server: McpServer,
-  obsidianService: ObsidianRestApiService, // Dependency injection for the Obsidian service
+  vaultManager: VaultManager, // Dependency injection for the VaultManager
 ): Promise<void> => {
   const toolName = "obsidian_list_files";
   const toolDescription =
-    "Lists files and subdirectories within a specified Obsidian vault folder. Supports optional filtering by extension or name regex, and recursive listing to a specified depth (-1 for infinite). Returns an object containing the listed directory path, a formatted tree string of its contents, and the total entry count. Use an empty string or '/' for dirPath to list the vault root.";
+    "Lists files and subdirectories within a specified Obsidian vault folder. Supports multi-vault setups - specify 'vault' parameter to target a specific vault, or omit for default vault. Supports optional filtering by extension or name regex, and recursive listing to a specified depth (-1 for infinite). Returns an object containing the listed directory path, a formatted tree string of its contents, and the total entry count. Use an empty string or '/' for dirPath to list the vault root.";
 
   // Create a context specifically for the registration process.
   const registrationContext: RequestContext =
@@ -98,7 +98,7 @@ export const registerObsidianListFilesTool = async (
                 await processObsidianListFiles(
                   params,
                   handlerContext,
-                  obsidianService,
+                  vaultManager,
                 );
               logger.debug(
                 `'${toolName}' processed successfully`,
