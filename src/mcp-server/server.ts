@@ -37,6 +37,7 @@ import { registerObsidianManageFrontmatterTool } from "./tools/obsidianManageFro
 import { registerObsidianManageTagsTool } from "./tools/obsidianManageTagsTool/index.js";
 import { registerObsidianDataviewQueryTool } from "./tools/obsidianDataviewQueryTool/index.js";
 import { registerObsidianTaskQueryTool } from "./tools/obsidianTaskQueryTool/index.js";
+import { registerObsidianTasksQueryBuilderTool } from "./tools/obsidianTasksQueryBuilderTool/index.js";
 import { registerObsidianCreateTaskTool } from "./tools/obsidianCreateTaskTool/index.js";
 import { registerObsidianUpdateTaskTool } from "./tools/obsidianUpdateTaskTool/index.js";
 import { registerObsidianPeriodicNotesTool } from "./tools/obsidianPeriodicNotesTool/index.js";
@@ -119,6 +120,8 @@ async function createMcpServerInstance(
     await registerObsidianReadFileTool(server, vaultManager);
     await registerObsidianListFilesTool(server, vaultManager);
     await registerObsidianDeleteFileTool(server, vaultManager);
+    await registerObsidianTaskQueryTool(server, vaultManager);
+    await registerObsidianTasksQueryBuilderTool(server, vaultManager);
     
     // Register tools using compatibility bridge (legacy signatures)
     if (config.obsidianEnableCache && defaultVaultCacheService) {
@@ -135,7 +138,6 @@ async function createMcpServerInstance(
     await registerObsidianManageFrontmatterTool(server, defaultObsidianService, defaultVaultCacheService);
     await registerObsidianManageTagsTool(server, defaultObsidianService, defaultVaultCacheService);
     await registerObsidianDataviewQueryTool(server, defaultObsidianService);
-    await registerObsidianTaskQueryTool(server, defaultObsidianService);
     await registerObsidianCreateTaskTool(server, defaultObsidianService);
     await registerObsidianUpdateTaskTool(server, defaultObsidianService);
     await registerObsidianPeriodicNotesTool(server, defaultObsidianService);

@@ -57,6 +57,8 @@ export type OutputFormatType = typeof OutputFormat[keyof typeof OutputFormat];
  * Zod schema for validating task query input parameters
  */
 export const TaskQueryInputSchema = z.object({
+  vault: z.string().optional(),
+  
   status: z.enum([
     TaskStatus.INCOMPLETE,
     TaskStatus.COMPLETED,
@@ -556,7 +558,262 @@ ${tasks.length > 0 ? `\n**Sample Tasks**:\n${tasks.slice(0, 5).map(t => `- ${t.s
 }
 
 /**
- * Core logic for executing task queries
+ * Build a native Tasks plugin query from input parameters
+ */
+function buildTasksPluginQuery(input: TaskQueryInput): string {
+  const queryParts: string[] = [];
+  
+  // Status filters
+  if (input.status !== TaskStatus.ALL) {
+    switch (input.status) {
+      case TaskStatus.INCOMPLETE:
+        queryParts.push("not done");
+        break;
+      case TaskStatus.COMPLETED:
+        queryParts.push("done");
+        break;
+      case TaskStatus.IN_PROGRESS:
+        queryParts.push("status.type is IN_PROGRESS");
+        break;
+      case TaskStatus.CANCELLED:
+        queryParts.push("status.type is CANCELLED");
+        break;
+      case TaskStatus.DEFERRED:
+        queryParts.push("status.type is DEFERRED");
+        break;
+      case TaskStatus.SCHEDULED:
+        queryParts.push("status.type is TODO");
+        break;
+    }
+  }
+  
+  // Date range filters using Tasks plugin syntax
+  if (input.dateRange !== "all-time") {
+    switch (input.dateRange) {
+      case "today":
+        queryParts.push("due today");
+        break;
+      case "yesterday":
+        queryParts.push("due before today");
+        queryParts.push("due after tomorrow");
+        break;
+      case "tomorrow":
+        queryParts.push("due tomorrow");
+        break;
+      case "this-week":
+        queryParts.push("due before next week");
+        queryParts.push("due after last week");
+        break;
+      case "next-week":
+        queryParts.push("due in next week");
+        break;
+      case "overdue":
+        queryParts.push("due before today");
+        break;
+      case "upcoming":
+        queryParts.push("due after today");
+        queryParts.push("due before next week");
+        break;
+    }
+  }
+  
+  // Priority filters
+  if (input.priority !== "all") {
+    switch (input.priority) {
+      case "highest":
+        queryParts.push("priority is highest");
+        break;
+      case "high":
+        queryParts.push("priority is high");
+        break;
+      case "medium":
+        queryParts.push("priority is medium");
+        break;
+      case "low":
+        queryParts.push("priority is low");
+        break;
+      case "lowest":
+        queryParts.push("priority is lowest");
+        break;
+    }
+  }
+  
+  // Folder filter
+  if (input.folder) {
+    queryParts.push(`path includes ${input.folder}`);
+  }
+  
+  // Tag filters
+  if (input.tags && input.tags.length > 0) {
+    const tagFilters = input.tags.map(tag => `tags include #${tag}`);
+    queryParts.push(`(${tagFilters.join(" OR ")})`);
+  }
+  
+  // Sorting and limits
+  queryParts.push("sort by urgency reverse");
+  queryParts.push("sort by due");
+  queryParts.push("sort by priority reverse");
+  queryParts.push(`limit ${input.limit}`);
+  
+  return queryParts.join("\n");
+}
+
+/**
+ * Execute a Tasks plugin query using Dataview integration
+ */
+async function executeTasksPluginQuery(
+  tasksQuery: string,
+  obsidianService: ObsidianRestApiService,
+  context: RequestContext
+): Promise<TaskItem[]> {
+  try {
+    // Use Dataview to access Tasks plugin data with native query
+    const dataviewQuery = `
+TABLE WITHOUT ID 
+  task.text as Text,
+  task.status.symbol as Status,
+  task.priority.name as Priority,
+  task.due as DueDate,
+  task.scheduled as ScheduledDate,
+  task.start as StartDate,
+  task.done as CompletionDate,
+  task.created as CreatedDate,
+  task.recurrence as Recurrence,
+  task.tags as Tags,
+  file.path as FilePath,
+  task.line as LineNumber
+FROM "/"
+FLATTEN file.tasks as task
+WHERE task
+${convertTasksQueryToDataview(tasksQuery)}
+LIMIT 500`;
+
+    logger.debug("Executing Tasks plugin query via Dataview", {
+      ...context,
+      tasksQuery,
+      dataviewQuery,
+    });
+
+    const dataviewResults = await obsidianService.searchComplex(
+      dataviewQuery,
+      "application/vnd.olrapi.dataview.dql+txt",
+      context
+    );
+
+    // Convert Dataview results to TaskItem format
+    const tasks: TaskItem[] = [];
+    
+    for (const searchResult of dataviewResults) {
+      if (searchResult.result) {
+        const result = searchResult.result;
+        
+        const task: TaskItem = {
+          text: result.Text || "",
+          status: parseTaskStatusFromSymbol(result.Status || " "),
+          statusChar: result.Status || " ",
+          filePath: result.FilePath || "",
+          lineNumber: result.LineNumber || 0,
+          indentLevel: 0,
+          hasSubtasks: false,
+          tags: Array.isArray(result.Tags) ? result.Tags : [],
+        };
+        
+        // Add optional properties if they exist
+        if (result.Priority) task.priority = result.Priority.toLowerCase();
+        if (result.DueDate) task.dueDate = result.DueDate;
+        if (result.ScheduledDate) task.scheduledDate = result.ScheduledDate;
+        if (result.StartDate) task.startDate = result.StartDate;
+        if (result.CompletionDate) task.completionDate = result.CompletionDate;
+        if (result.CreatedDate) task.createdDate = result.CreatedDate;
+        if (result.Recurrence) task.recurrence = result.Recurrence;
+        
+        tasks.push(task);
+      }
+    }
+    
+    logger.info(`Retrieved ${tasks.length} tasks via Tasks plugin integration`, context);
+    return tasks;
+    
+  } catch (error) {
+    logger.warning("Tasks plugin query failed, falling back to manual parsing", {
+      ...context,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    throw error;
+  }
+}
+
+/**
+ * Convert Tasks plugin query syntax to Dataview WHERE clauses
+ */
+function convertTasksQueryToDataview(tasksQuery: string): string {
+  const lines = tasksQuery.split('\n').map(line => line.trim()).filter(line => line);
+  const whereConditions: string[] = [];
+  
+  for (const line of lines) {
+    if (line.startsWith("not done")) {
+      whereConditions.push("AND !task.completed");
+    } else if (line.startsWith("done")) {
+      whereConditions.push("AND task.completed");
+    } else if (line.includes("due today")) {
+      whereConditions.push("AND task.due = date(today)");
+    } else if (line.includes("due before today")) {
+      whereConditions.push("AND task.due < date(today)");
+    } else if (line.includes("due tomorrow")) {
+      whereConditions.push("AND task.due = date(today) + dur(1 day)");
+    } else if (line.includes("priority is highest")) {
+      whereConditions.push("AND task.priority.name = \"Highest\"");
+    } else if (line.includes("priority is high")) {
+      whereConditions.push("AND task.priority.name = \"High\"");
+    } else if (line.includes("priority is medium")) {
+      whereConditions.push("AND task.priority.name = \"Medium\"");
+    } else if (line.includes("priority is low")) {
+      whereConditions.push("AND task.priority.name = \"Low\"");
+    } else if (line.includes("priority is lowest")) {
+      whereConditions.push("AND task.priority.name = \"Lowest\"");
+    } else if (line.includes("path includes")) {
+      const pathMatch = line.match(/path includes (.+)/);
+      if (pathMatch) {
+        whereConditions.push(`AND contains(file.path, "${pathMatch[1]}")`);
+      }
+    } else if (line.includes("tags include")) {
+      const tagMatch = line.match(/tags include #(.+)/);
+      if (tagMatch) {
+        whereConditions.push(`AND contains(task.tags, "${tagMatch[1]}")`);
+      }
+    }
+  }
+  
+  return whereConditions.join(" ");
+}
+
+/**
+ * Parse task status from Tasks plugin status symbol
+ */
+function parseTaskStatusFromSymbol(symbol: string): TaskStatusType {
+  switch (symbol) {
+    case " ":
+    case "":
+      return TaskStatus.INCOMPLETE;
+    case "x":
+    case "X":
+      return TaskStatus.COMPLETED;
+    case "/":
+    case "\\":
+      return TaskStatus.IN_PROGRESS;
+    case "-":
+      return TaskStatus.CANCELLED;
+    case ">":
+      return TaskStatus.DEFERRED;
+    case "<":
+      return TaskStatus.SCHEDULED;
+    default:
+      return TaskStatus.INCOMPLETE;
+  }
+}
+
+/**
+ * Core logic for executing task queries with enhanced Tasks plugin integration
  */
 export async function obsidianTaskQueryLogic(
   input: TaskQueryInput,
@@ -565,7 +822,7 @@ export async function obsidianTaskQueryLogic(
 ): Promise<TaskQueryResponse> {
   const startTime = Date.now();
   
-  logger.info("Executing enhanced task query", {
+  logger.info("Executing enhanced task query with Tasks plugin integration", {
     ...context,
     operation: "taskQuery",
     params: {
@@ -580,115 +837,119 @@ export async function obsidianTaskQueryLogic(
   });
 
   try {
-    // Step 1: Enhanced search strategy - try Dataview first, fallback to simple search
-    let searchResults = new Map<string, any>();
-    
-    // Try Dataview query for more efficient task discovery
+    let allTasks: TaskItem[] = [];
+    let filesSearched = 0;
+
+    // Step 1: Try native Tasks plugin integration via Dataview
     try {
-      const dataviewQuery = `
+      const tasksQuery = buildTasksPluginQuery(input);
+      logger.debug("Built Tasks plugin query", { ...context, tasksQuery });
+      
+      allTasks = await executeTasksPluginQuery(tasksQuery, obsidianService, context);
+      filesSearched = new Set(allTasks.map(t => t.filePath)).size;
+      
+    } catch (tasksPluginError) {
+      logger.info("Tasks plugin integration failed, falling back to manual parsing", {
+        ...context,
+        error: tasksPluginError instanceof Error ? tasksPluginError.message : String(tasksPluginError),
+      });
+
+      // Fallback to enhanced manual search and parsing
+      let searchResults = new Map<string, any>();
+      
+      // Try Dataview query for file discovery
+      try {
+        const dataviewQuery = `
 TABLE WITHOUT ID file.link as File, length(file.tasks) as Tasks
 WHERE length(file.tasks) > 0
 SORT file.name ASC
 LIMIT 100`;
-      
-      const dataviewResults = await obsidianService.searchComplex(
-        dataviewQuery,
-        "application/vnd.olrapi.dataview.dql+txt",
-        context
-      );
-      
-      // Convert Dataview results to our search format
-      for (const searchResult of dataviewResults) {
-        if (searchResult.result && searchResult.result.File) {
-          const filename = searchResult.result.File.replace(/\[\[(.+)\]\]/, '$1');
-          searchResults.set(filename, { filename, match: searchResult.result });
-        } else if (searchResult.filename) {
-          // Fallback to using the filename directly
-          searchResults.set(searchResult.filename, searchResult);
+        
+        const dataviewResults = await obsidianService.searchComplex(
+          dataviewQuery,
+          "application/vnd.olrapi.dataview.dql+txt",
+          context
+        );
+        
+        for (const searchResult of dataviewResults) {
+          if (searchResult.result && searchResult.result.File) {
+            const filename = searchResult.result.File.replace(/\[\[(.+)\]\]/, '$1');
+            searchResults.set(filename, { filename, match: searchResult.result });
+          } else if (searchResult.filename) {
+            searchResults.set(searchResult.filename, searchResult);
+          }
+        }
+        
+      } catch (dataviewError) {
+        // Fallback to simple search
+        const taskPatterns = [
+          "- [ ]", "- [x]", "- [/]", "- [-]", "- [>]", "- [<]",
+          "* [ ]", "* [x]", "* [/]", "* [-]", "* [>]", "* [<]",
+        ];
+        
+        for (const pattern of taskPatterns) {
+          try {
+            const results = await obsidianService.searchSimple(pattern, 50, context);
+            for (const result of results) {
+              if (!searchResults.has(result.filename)) {
+                searchResults.set(result.filename, result);
+              }
+            }
+          } catch (searchError) {
+            logger.warning(`Failed to search for pattern "${pattern}"`, {
+              ...context,
+              error: searchError instanceof Error ? searchError.message : String(searchError),
+            });
+          }
         }
       }
-      
-      logger.info(`Found ${searchResults.size} files with tasks via Dataview`, context);
-      
-    } catch (dataviewError) {
-      logger.info("Dataview query failed, falling back to simple search", {
-        ...context,
-        error: dataviewError instanceof Error ? dataviewError.message : String(dataviewError),
-      });
-      
-      // Fallback to simple search with enhanced patterns
-      const taskPatterns = [
-        "- [ ]", "- [x]", "- [/]", "- [-]", "- [>]", "- [<]",
-        "* [ ]", "* [x]", "* [/]", "* [-]", "* [>]", "* [<]",
-        "1. [ ]", "1. [x]", "1. [/]", "1. [-]", "1. [>]", "1. [<]"
-      ];
-      
-      for (const pattern of taskPatterns) {
+
+      // Filter files by folder if specified
+      let filesToProcess = Array.from(searchResults.values());
+      if (input.folder) {
+        filesToProcess = filesToProcess.filter(file => 
+          file.filename.startsWith(input.folder)
+        );
+      }
+
+      // Process each file to extract and parse tasks manually
+      for (const fileResult of filesToProcess.slice(0, Math.min(50, filesToProcess.length))) {
         try {
-          const results = await obsidianService.searchSimple(pattern, 50, context);
-          for (const result of results) {
-            if (!searchResults.has(result.filename)) {
-              searchResults.set(result.filename, result);
-            }
-          }
-        } catch (searchError) {
-          logger.warning(`Failed to search for pattern "${pattern}"`, {
+          filesSearched++;
+          const fileContent = await obsidianService.getFileContent(fileResult.filename, "markdown", context);
+          const tasks = parseTasksFromContent(
+            typeof fileContent === "string" ? fileContent : fileContent.content, 
+            fileResult.filename, 
+            input.status
+          );
+          allTasks.push(...tasks);
+        } catch (fileError) {
+          logger.warning(`Failed to read file: ${fileResult.filename}`, {
             ...context,
-            error: searchError instanceof Error ? searchError.message : String(searchError),
+            error: fileError instanceof Error ? fileError.message : String(fileError),
           });
         }
       }
-    }
 
-    // Step 2: Filter files by folder if specified
-    let filesToProcess = Array.from(searchResults.values());
-    if (input.folder) {
-      filesToProcess = filesToProcess.filter(file => 
-        file.filename.startsWith(input.folder)
-      );
-    }
-
-    // Step 3: Process each file to extract and parse tasks
-    const allTasks: TaskItem[] = [];
-    let filesSearched = 0;
-    
-    for (const fileResult of filesToProcess.slice(0, Math.min(50, filesToProcess.length))) {
-      try {
-        filesSearched++;
-        const fileContent = await obsidianService.getFileContent(fileResult.filename, "markdown", context);
-        const tasks = parseTasksFromContent(typeof fileContent === "string" ? fileContent : fileContent.content, fileResult.filename, input.status);
-        allTasks.push(...tasks);
-      } catch (fileError) {
-        logger.warning(`Failed to read file: ${fileResult.filename}`, {
-          ...context,
-          error: fileError instanceof Error ? fileError.message : String(fileError),
-        });
+      // Apply manual filters for fallback mode
+      allTasks = filterTasksByDate(allTasks, input.dateRange, input.status);
+      
+      if (input.priority !== "all") {
+        allTasks = allTasks.filter(task => task.priority === input.priority);
+      }
+      
+      if (input.tags && input.tags.length > 0) {
+        allTasks = allTasks.filter(task => 
+          input.tags!.some(tag => task.tags.includes(tag))
+        );
       }
     }
 
-    // Step 4: Apply additional filters
-    let filteredTasks = allTasks;
-    
-    // Filter by date range
-    filteredTasks = filterTasksByDate(filteredTasks, input.dateRange, input.status);
-    
-    // Filter by priority
-    if (input.priority !== "all") {
-      filteredTasks = filteredTasks.filter(task => task.priority === input.priority);
-    }
-    
-    // Filter by tags (if any task tags match the requested tags)
-    if (input.tags && input.tags.length > 0) {
-      filteredTasks = filteredTasks.filter(task => 
-        input.tags!.some(tag => task.tags.includes(tag))
-      );
-    }
-
-    // Step 5: Enhanced sorting with multiple criteria
-    filteredTasks.sort((a, b) => {
+    // Enhanced sorting with multiple criteria
+    allTasks.sort((a, b) => {
       // First sort by urgency if available
       if (a.urgency !== undefined && b.urgency !== undefined) {
-        const urgencyDiff = b.urgency - a.urgency; // Higher urgency first
+        const urgencyDiff = b.urgency - a.urgency;
         if (urgencyDiff !== 0) return urgencyDiff;
       }
       
@@ -712,23 +973,23 @@ LIMIT 100`;
       return fileCompare !== 0 ? fileCompare : a.lineNumber - b.lineNumber;
     });
     
-    const limitedTasks = filteredTasks.slice(0, input.limit);
+    const limitedTasks = allTasks.slice(0, input.limit);
 
-    // Step 6: Generate summary statistics
+    // Generate summary statistics
     const summary = {
-      totalTasks: filteredTasks.length,
-      incompleteCount: filteredTasks.filter(t => t.status === TaskStatus.INCOMPLETE).length,
-      completedCount: filteredTasks.filter(t => t.status === TaskStatus.COMPLETED).length,
-      inProgressCount: filteredTasks.filter(t => t.status === TaskStatus.IN_PROGRESS).length,
-      cancelledCount: filteredTasks.filter(t => t.status === TaskStatus.CANCELLED).length,
-      deferredCount: filteredTasks.filter(t => t.status === TaskStatus.DEFERRED).length,
-      scheduledCount: filteredTasks.filter(t => t.status === TaskStatus.SCHEDULED).length,
-      overdueCount: filteredTasks.filter(t => t.dueDate && new Date(t.dueDate) < new Date()).length,
-      highPriorityCount: filteredTasks.filter(t => ['highest', 'high'].includes(t.priority || '')).length,
+      totalTasks: allTasks.length,
+      incompleteCount: allTasks.filter(t => t.status === TaskStatus.INCOMPLETE).length,
+      completedCount: allTasks.filter(t => t.status === TaskStatus.COMPLETED).length,
+      inProgressCount: allTasks.filter(t => t.status === TaskStatus.IN_PROGRESS).length,
+      cancelledCount: allTasks.filter(t => t.status === TaskStatus.CANCELLED).length,
+      deferredCount: allTasks.filter(t => t.status === TaskStatus.DEFERRED).length,
+      scheduledCount: allTasks.filter(t => t.status === TaskStatus.SCHEDULED).length,
+      overdueCount: allTasks.filter(t => t.dueDate && new Date(t.dueDate) < new Date()).length,
+      highPriorityCount: allTasks.filter(t => ['highest', 'high'].includes(t.priority || '')).length,
       filesSearched,
     };
 
-    // Step 7: Format output
+    // Format output
     const formattedOutput = formatTaskOutput(limitedTasks, input.format, summary);
     
     const executionTime = `${Date.now() - startTime}ms`;

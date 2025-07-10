@@ -5,7 +5,7 @@
  */
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { ObsidianRestApiService } from "../../../services/obsidianRestAPI/index.js";
+import { VaultManager } from "../../../services/vaultManager/index.js";
 import { BaseErrorCode, McpError } from "../../../types-global/errors.js";
 import {
   ErrorHandler,
@@ -27,13 +27,13 @@ import {
  * providing powerful filtering, sorting, and formatting capabilities for task management.
  * 
  * @param server - The MCP server instance to register the tool with
- * @param obsidianService - The Obsidian REST API service instance
+ * @param vaultManager - The VaultManager instance for multi-vault support
  * @returns Promise that resolves when registration is complete
  * @throws McpError if registration fails critically
  */
 export const registerObsidianTaskQueryTool = async (
   server: McpServer,
-  obsidianService: ObsidianRestApiService,
+  vaultManager: VaultManager,
 ): Promise<void> => {
   const toolName = "obsidian_task_query";
   const toolDescription = `Enhanced search and analysis of tasks across your Obsidian vault with full Obsidian Tasks plugin support.
@@ -76,6 +76,10 @@ This tool provides comprehensive task management with complete Obsidian Tasks pl
 - this-month, next-month, last-month
 - overdue, upcoming, all-time
 
+**Multi-Vault Support:**
+- Default vault: omit vault parameter to use first configured vault
+- Specific vault: vault="work" or vault="personal"
+
 **Examples:**
 - Find all incomplete tasks: status="incomplete"
 - Today's tasks: dateRange="today"
@@ -83,6 +87,7 @@ This tool provides comprehensive task management with complete Obsidian Tasks pl
 - High priority tasks: priority="high" or priority="highest"
 - Tasks in specific folder: folder="Projects/Active"
 - Tasks with specific tags: tags=["urgent", "work"]
+- Tasks in work vault: vault="work", status="incomplete"
 - Summary view: format="summary"
 - Detailed analysis: format="table"`;
 
@@ -133,6 +138,9 @@ This tool provides comprehensive task management with complete Obsidian Tasks pl
           // Wrap the core logic execution in a tryCatch block
           return await ErrorHandler.tryCatch(
             async () => {
+              // Get the appropriate Obsidian service based on vault parameter
+              const obsidianService = vaultManager.getVaultService(params.vault, handlerContext);
+              
               // Execute the task query logic
               const response: TaskQueryResponse =
                 await obsidianTaskQueryLogic(
