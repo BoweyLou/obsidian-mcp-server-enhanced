@@ -17,11 +17,19 @@ Built on the [`cyanheads/mcp-ts-template`](https://github.com/cyanheads/mcp-ts-t
 
 ## 🚀 Enhanced Features (This Fork)
 
+### 🏛️ **Multi-Vault Support**
+Simultaneous access to multiple Obsidian vaults through a single MCP server:
+- **Multiple Vault Management**: Connect to multiple Obsidian instances on different ports simultaneously
+- **Vault-Specific Routing**: Tools automatically route to the correct vault based on `vault` parameter
+- **Individual Authentication**: Separate API keys for each vault with centralized MCP authentication
+- **Backwards Compatible**: Existing single-vault configurations continue to work unchanged
+- **Dynamic Configuration**: JSON-based vault configuration with validation and error handling
+
 ### 🌐 **Claude.ai Remote Integration**
 Perfect integration with Claude.ai's Remote MCP feature:
 - **Stateless HTTP Mode**: Dedicated stateless transport for Claude.ai compatibility (`MCP_HTTP_STATELESS=true`)
 - **Session-Based Mode**: Traditional session management for other MCP clients
-- **Simple API Key Authentication**: Uses your Obsidian API key in the external URL
+- **Simplified Authentication**: Uses dedicated MCP_AUTH_KEY for server access
 - **Zero Configuration**: Works out-of-the-box with Claude.ai Remote MCP servers
 - **Production Ready**: Enterprise-grade stability and error handling
 
@@ -151,52 +159,98 @@ If running directly, they can be set in a `.env` file in the project root or dir
 
 | Variable                              | Description                                               | Required          | Default                  |
 | :------------------------------------ | :-------------------------------------------------------- | :---------------- | :----------------------- |
-| **`OBSIDIAN_API_KEY`**                | API Key from the Obsidian Local REST API plugin.          | **Yes**           | `undefined`              |
-| **`OBSIDIAN_BASE_URL`**               | Base URL of your Obsidian Local REST API.                 | **Yes**           | `http://127.0.0.1:27123` |
+| **`MCP_AUTH_KEY`**                    | Authentication key for Claude.ai Remote MCP access. Generate with `openssl rand -hex 32` | **Yes** (Remote)  | `undefined`              |
+| **`OBSIDIAN_VAULTS`**                 | JSON array of vault configurations for multi-vault mode.   | **Yes** (Multi)    | `undefined`              |
+| **`OBSIDIAN_API_KEY`**                | API Key from Obsidian plugin (single-vault mode only).     | **Yes** (Single)  | `undefined`              |
+| **`OBSIDIAN_BASE_URL`**               | Base URL of Obsidian API (single-vault mode only).         | **Yes** (Single)  | `http://127.0.0.1:27123` |
 | `MCP_TRANSPORT_TYPE`                  | Server transport: `stdio` or `http`.                      | No                | `http`                   |
 | `MCP_HTTP_PORT`                       | Port for the HTTP server.                                 | No                | `3010`                   |
 | `MCP_HTTP_HOST`                       | Host for the HTTP server.                                 | No                | `127.0.0.1`              |
 | `MCP_HTTP_STATELESS`                  | Enable stateless mode for Claude.ai compatibility.        | No                | `false`                  |
 | `MCP_ALLOWED_ORIGINS`                 | Comma-separated origins for CORS. **Set for production.** | No                | (none)                   |
-| `MCP_AUTH_SECRET_KEY`                 | 32+ char secret for JWT auth. **Not used in this version.** | No                | `undefined`              |
 | `MCP_LOG_LEVEL`                       | Logging level (`debug`, `info`, `error`, etc.).           | No                | `info`                   |
 | `OBSIDIAN_VERIFY_SSL`                 | Set to `false` to disable SSL verification.               | No                | `true`                   |
 | `OBSIDIAN_ENABLE_CACHE`               | Set to `true` to enable the in-memory vault cache.        | No                | `true`                   |
 | `OBSIDIAN_CACHE_REFRESH_INTERVAL_MIN` | Refresh interval for the vault cache in minutes.          | No                | `10`                     |
 
+### Multi-Vault Configuration
+
+The server supports both single-vault (backwards compatible) and multi-vault modes:
+
+#### Single-Vault Mode (Legacy)
+```bash
+# .env file
+MCP_AUTH_KEY=your-generated-mcp-auth-key
+OBSIDIAN_API_KEY=your-obsidian-plugin-api-key
+OBSIDIAN_BASE_URL=http://127.0.0.1:27123
+MCP_TRANSPORT_TYPE=http
+MCP_HTTP_STATELESS=true
+```
+
+#### Multi-Vault Mode (Recommended)
+```bash
+# .env file
+MCP_AUTH_KEY=your-generated-mcp-auth-key
+OBSIDIAN_VAULTS='[
+  {
+    "id": "work",
+    "name": "Work Vault", 
+    "apiKey": "work-vault-api-key",
+    "baseUrl": "http://127.0.0.1:27123",
+    "verifySsl": false
+  },
+  {
+    "id": "personal",
+    "name": "Personal Vault",
+    "apiKey": "personal-vault-api-key", 
+    "baseUrl": "http://127.0.0.1:27122",
+    "verifySsl": false
+  }
+]'
+MCP_TRANSPORT_TYPE=http
+MCP_HTTP_STATELESS=true
+```
+
+#### Setup Process
+1. **Generate MCP Auth Key**: `openssl rand -hex 32`
+2. **Configure Multiple Obsidian Instances**: Install Local REST API plugin on different ports
+3. **Get API Keys**: Extract API keys from each Obsidian instance's plugin settings
+4. **Configure Vaults**: Update `.env` with `OBSIDIAN_VAULTS` JSON configuration
+5. **Start Server**: `npm run start:http`
+6. **Access via Claude.ai**: Use your Tailscale URL with MCP_AUTH_KEY
+
 ### Connecting to the Obsidian API
 
-To connect the MCP server to your Obsidian vault, you need to configure the base URL (`OBSIDIAN_BASE_URL`) and API key (`OBSIDIAN_API_KEY`). The Obsidian Local REST API plugin offers two ways to connect:
+#### Single-Vault Mode
+To connect in single-vault mode, configure the base URL (`OBSIDIAN_BASE_URL`) and API key (`OBSIDIAN_API_KEY`). The Obsidian Local REST API plugin offers two connection types:
 
-1.  **Encrypted (HTTPS) - Default**:
+1.  **Encrypted (HTTPS)**:
+    - Uses secure `https://` endpoint (e.g., `https://127.0.0.1:27124`)
+    - Requires `OBSIDIAN_VERIFY_SSL=false` for self-signed certificates
 
-    - The plugin provides a secure `https://` endpoint (e.g., `https://127.0.0.1:27124`).
-    - This uses a self-signed certificate, which will cause connection errors by default.
-    - **To fix this**, you must set the `OBSIDIAN_VERIFY_SSL` environment variable to `"false"`. This tells the server to trust the self-signed certificate.
+2.  **Non-encrypted (HTTP) - Recommended**:
+    - Uses `http://` endpoint (e.g., `http://127.0.0.1:27123`)
+    - Simpler setup, no SSL verification needed
 
-2.  **Non-encrypted (HTTP) - Recommended for Simplicity**:
-    - In the plugin's settings within Obsidian, you can enable the "Non-encrypted (HTTP) Server".
-    - This provides a simpler `http://` endpoint (e.g., `http://127.0.0.1:27123`).
-    - When using this URL, you do not need to worry about SSL verification.
+#### Multi-Vault Mode
+For multi-vault mode, configure each vault individually in the `OBSIDIAN_VAULTS` JSON array with its own API key and base URL. Each vault can use either HTTP or HTTPS as needed.
 
-**Example `env` configuration for your MCP client:**
+**Example configurations:**
 
-_Using the non-encrypted HTTP URL (recommended):_
-
+_Single-vault with HTTP:_
 ```json
 "env": {
-  "OBSIDIAN_API_KEY": "YOUR_API_KEY_FROM_OBSIDIAN_PLUGIN",
+  "MCP_AUTH_KEY": "your-generated-mcp-auth-key",
+  "OBSIDIAN_API_KEY": "your-obsidian-api-key",
   "OBSIDIAN_BASE_URL": "http://127.0.0.1:27123"
 }
 ```
 
-_Using the encrypted HTTPS URL:_
-
+_Multi-vault configuration:_
 ```json
 "env": {
-  "OBSIDIAN_API_KEY": "YOUR_API_KEY_FROM_OBSIDIAN_PLUGIN",
-  "OBSIDIAN_BASE_URL": "https://127.0.0.1:27124",
-  "OBSIDIAN_VERIFY_SSL": "false"
+  "MCP_AUTH_KEY": "your-generated-mcp-auth-key",
+  "OBSIDIAN_VAULTS": "[{\"id\":\"work\",\"name\":\"Work\",\"apiKey\":\"work-key\",\"baseUrl\":\"http://127.0.0.1:27123\"},{\"id\":\"personal\",\"name\":\"Personal\",\"apiKey\":\"personal-key\",\"baseUrl\":\"http://127.0.0.1:27122\"}]"
 }
 ```
 
@@ -206,6 +260,7 @@ _Using the encrypted HTTPS URL:_
 
 For local MCP clients (e.g., Cline), add to your settings (e.g., `cline_mcp_settings.json`):
 
+**Single-vault configuration:**
 ```json
 {
   "mcpServers": {
@@ -213,9 +268,26 @@ For local MCP clients (e.g., Cline), add to your settings (e.g., `cline_mcp_sett
       "command": "node",
       "args": ["/path/to/your/obsidian-mcp-server-enhanced/dist/index.js"],
       "env": {
-        "OBSIDIAN_API_KEY": "YOUR_OBSIDIAN_API_KEY",
+        "MCP_AUTH_KEY": "your-generated-mcp-auth-key",
+        "OBSIDIAN_API_KEY": "your-obsidian-api-key",
         "OBSIDIAN_BASE_URL": "http://127.0.0.1:27123",
-        "OBSIDIAN_VERIFY_SSL": "false",
+        "OBSIDIAN_ENABLE_CACHE": "true"
+      }
+    }
+  }
+}
+```
+
+**Multi-vault configuration:**
+```json
+{
+  "mcpServers": {
+    "obsidian-mcp-server": {
+      "command": "node",
+      "args": ["/path/to/your/obsidian-mcp-server-enhanced/dist/index.js"],
+      "env": {
+        "MCP_AUTH_KEY": "your-generated-mcp-auth-key",
+        "OBSIDIAN_VAULTS": "[{\"id\":\"work\",\"name\":\"Work Vault\",\"apiKey\":\"work-api-key\",\"baseUrl\":\"http://127.0.0.1:27123\"},{\"id\":\"personal\",\"name\":\"Personal Vault\",\"apiKey\":\"personal-api-key\",\"baseUrl\":\"http://127.0.0.1:27122\"}]",
         "OBSIDIAN_ENABLE_CACHE": "true"
       }
     }
@@ -235,58 +307,86 @@ For remote access to your Obsidian vault from anywhere, you can use Tailscale to
 
 ### Setup Steps
 
-1. **Configure HTTP Transport**: Set the MCP server to use HTTP transport:
+1. **Generate MCP Auth Key**:
    ```bash
-   export MCP_TRANSPORT_TYPE=http
-   export MCP_HTTP_PORT=3010
+   openssl rand -hex 32
    ```
 
-2. **Start the MCP Server**: 
+2. **Configure Environment**: Set up your `.env` file with the generated key:
    ```bash
-   node dist/index.js
+   MCP_AUTH_KEY=your-generated-auth-key
+   MCP_TRANSPORT_TYPE=http
+   MCP_HTTP_PORT=3010
+   MCP_HTTP_STATELESS=true
    ```
 
-3. **Enable Tailscale Funnel**:
+3. **Configure Vaults**: Set up single or multi-vault configuration (see [Multi-Vault Configuration](#multi-vault-configuration))
+
+4. **Start the MCP Server**: 
    ```bash
-   # Replace 'your-machine-name' with your actual Tailscale machine name
+   npm run build && npm run start:http
+   ```
+
+5. **Enable Tailscale Funnel**:
+   ```bash
    tailscale funnel 3010
    ```
 
-4. **Get Your Public URL**: Tailscale will provide a public HTTPS URL like:
+6. **Get Your Public URL**: Check your Tailscale device URL:
+   ```bash
+   tailscale status --self | grep "Funnel on"
    ```
-   https://your-machine-name.tail123abc.ts.net
-   ```
 
-### Claude.ai Remote MCP Configuration (Enhanced)
+### Claude.ai Remote MCP Configuration
 
-Add to your Claude.ai Remote MCP servers with simplified authentication:
+Add to your Claude.ai Remote MCP servers using your MCP authentication key:
 
+**Single-vault setup:**
 ```json
 {
-  "url": "https://your-machine-name.tail123abc.ts.net/mcp?api_key=your-obsidian-api-key",
+  "url": "https://your-device.your-tailnet.ts.net/mcp?api_key=your-mcp-auth-key",
   "name": "Obsidian Vault"
 }
 ```
 
-> **Note**: Claude.ai Remote MCP only supports URL parameter authentication. The API key must be included in the URL as shown above.
+**Multi-vault setup:**
+```json
+{
+  "url": "https://your-device.your-tailnet.ts.net/mcp?api_key=your-mcp-auth-key",
+  "name": "Obsidian Multi-Vault"
+}
+```
+
+> **Authentication Note**: Claude.ai Remote MCP uses the `MCP_AUTH_KEY` for server authentication. Individual vault operations use the vault-specific API keys configured in your environment.
 
 ### Security Considerations
 
-- **API Key Authentication**: The server uses your Obsidian API key for authentication
+- **Dual Authentication**: MCP server authentication via MCP_AUTH_KEY, vault authentication via individual API keys
 - **Tailscale Encryption**: All traffic is encrypted end-to-end by Tailscale
 - **Private Network**: Only you can access the server through your Tailscale network
 - **Automatic SSL**: Tailscale Funnel provides automatic HTTPS certificates
+- **Vault Isolation**: Each vault uses its own API key for secure access control
 
 ### Example Usage
 
 Once set up, you can use tools remotely from Claude.ai:
 
+**Single-vault commands (uses default vault):**
 ```
 Use obsidian_task_query to show me tasks due today with format="table"
 ```
 
+**Multi-vault commands (specify vault):**
 ```
-Use obsidian_dataview_query to run: TABLE file.name FROM #meeting WHERE file.cday = date(today)
+Use obsidian_task_query with vault="work" to show me work tasks due today
+```
+
+```
+Use obsidian_read_file with filePath="daily-note.md" and vault="personal" 
+```
+
+```
+Use obsidian_dataview_query with vault="work" to run: TABLE file.name FROM #meeting WHERE file.cday = date(today)
 ```
 
 > **🚀 Pro Tip**: For production use, set up [automatic startup on boot](./scripts/autostart/README.md) so your server and Tailscale Funnel start automatically without manual intervention.
@@ -306,7 +406,8 @@ src/
 │   ├── tools/         # MCP Tool implementations (subdirs per tool)
 │   └── transports/    # Stdio and HTTP transport logic, auth middleware
 ├── services/          # Abstractions for external APIs or internal caching
-│   └── obsidianRestAPI/ # Typed client for Obsidian Local REST API
+│   ├── obsidianRestAPI/ # Typed client for Obsidian Local REST API
+│   └── vaultManager/    # Multi-vault configuration and service management
 ├── types-global/      # Shared TypeScript type definitions (errors, etc.)
 └── utils/             # Common utility functions (logger, error handler, security, etc.)
 ```
@@ -339,27 +440,33 @@ The cache is enabled by default but can be configured via environment variables:
 
 ## Tools
 
-The Obsidian MCP Server provides a suite of tools for interacting with your vault, callable via the Model Context Protocol.
+The Obsidian MCP Server provides a suite of tools for interacting with your vault(s), callable via the Model Context Protocol.
 
-| Tool Name                     | Description                                               | Key Arguments                                                 |
-| :---------------------------- | :-------------------------------------------------------- | :------------------------------------------------------------ |
-| `obsidian_read_file`          | Retrieves the content and metadata of a file.             | `filePath`, `format?`, `includeStat?`                         |
-| `obsidian_update_file`        | Modifies a file by appending, prepending, or overwriting. | `targetType`, `content`, `targetIdentifier?`, `wholeFileMode` |
-| `obsidian_search_replace`     | Performs search-and-replace operations in a note.         | `targetType`, `replacements`, `useRegex?`, `replaceAll?`      |
-| `obsidian_global_search`      | Searches the entire vault for content.                    | `query`, `searchInPath?`, `useRegex?`, `page?`, `pageSize?`   |
-| `obsidian_list_files`         | Lists files and subdirectories in a folder.               | `dirPath`, `fileExtensionFilter?`, `nameRegexFilter?`         |
-| `obsidian_manage_frontmatter` | Gets, sets, or deletes keys in a note's frontmatter.      | `filePath`, `operation`, `key`, `value?`                      |
-| `obsidian_manage_tags`        | Adds, removes, or lists tags in a note.                   | `filePath`, `operation`, `tags`                               |
-| `obsidian_delete_file`        | Permanently deletes a file from the vault.                | `filePath`                                                    |
-| `obsidian_dataview_query`     | Execute Dataview DQL queries against your vault.          | `query`, `format?`                                            |
-| `obsidian_task_query`         | Search and analyze tasks across your vault.               | `status?`, `dateRange?`, `folder?`, `priority?`, `format?`    |
-| `obsidian_periodic_notes`     | Create and manage daily, weekly, monthly, yearly notes.   | `operation`, `periodType`, `date?`, `content?`, `append?`     |
-| `obsidian_block_reference`    | Work with block references and heading operations.        | `operation`, `filePath`, `heading?`, `content?`, `blockId?`   |
-| `obsidian_graph_analysis`     | Analyze note connections and vault relationships.         | `operation`, `filePath?`, `minConnections?`, `maxDepth?`      |
-| `obsidian_template_system`    | Create files from templates with variable substitution.   | `operation`, `templatePath?`, `targetPath?`, `variables?`     |
-| `obsidian_smart_linking`      | Get intelligent link suggestions and recommendations.     | `operation`, `filePath?`, `content?`, `maxSuggestions?`       |
+### Multi-Vault Support
+All tools support an optional `vault` parameter to specify which vault to operate on:
+- **Default Behavior**: Without `vault` parameter, tools use the first configured vault
+- **Specific Vault**: Add `vault: "vault-id"` to target a specific vault
+- **Example**: `obsidian_read_file(filePath="note.md", vault="work")`
 
-_Note: All tools support comprehensive error handling and return structured JSON responses._
+| Tool Name                     | Description                                               | Key Arguments                                                    |
+| :---------------------------- | :-------------------------------------------------------- | :--------------------------------------------------------------- |
+| `obsidian_read_file`          | Retrieves the content and metadata of a file.             | `filePath`, `vault?`, `format?`, `includeStat?`                 |
+| `obsidian_update_file`        | Modifies a file by appending, prepending, or overwriting. | `targetType`, `content`, `vault?`, `targetIdentifier?`, `wholeFileMode` |
+| `obsidian_search_replace`     | Performs search-and-replace operations in a note.         | `targetType`, `replacements`, `vault?`, `useRegex?`, `replaceAll?` |
+| `obsidian_global_search`      | Searches the entire vault for content.                    | `query`, `vault?`, `searchInPath?`, `useRegex?`, `page?`, `pageSize?` |
+| `obsidian_list_files`         | Lists files and subdirectories in a folder.               | `dirPath`, `vault?`, `fileExtensionFilter?`, `nameRegexFilter?` |
+| `obsidian_manage_frontmatter` | Gets, sets, or deletes keys in a note's frontmatter.      | `filePath`, `operation`, `key`, `vault?`, `value?`              |
+| `obsidian_manage_tags`        | Adds, removes, or lists tags in a note.                   | `filePath`, `operation`, `tags`, `vault?`                       |
+| `obsidian_delete_file`        | Permanently deletes a file from the vault.                | `filePath`, `vault?`                                             |
+| `obsidian_dataview_query`     | Execute Dataview DQL queries against your vault.          | `query`, `vault?`, `format?`                                    |
+| `obsidian_task_query`         | Search and analyze tasks across your vault.               | `vault?`, `status?`, `dateRange?`, `folder?`, `priority?`, `format?` |
+| `obsidian_periodic_notes`     | Create and manage daily, weekly, monthly, yearly notes.   | `operation`, `periodType`, `vault?`, `date?`, `content?`, `append?` |
+| `obsidian_block_reference`    | Work with block references and heading operations.        | `operation`, `filePath`, `vault?`, `heading?`, `content?`, `blockId?` |
+| `obsidian_graph_analysis`     | Analyze note connections and vault relationships.         | `operation`, `vault?`, `filePath?`, `minConnections?`, `maxDepth?` |
+| `obsidian_template_system`    | Create files from templates with variable substitution.   | `operation`, `vault?`, `templatePath?`, `targetPath?`, `variables?` |
+| `obsidian_smart_linking`      | Get intelligent link suggestions and recommendations.     | `operation`, `vault?`, `filePath?`, `content?`, `maxSuggestions?` |
+
+_Note: All tools support comprehensive error handling, multi-vault routing, and return structured JSON responses._
 
 
 ## License
@@ -371,9 +478,10 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 This enhanced version is based on the excellent work by [cyanheads](https://github.com/cyanheads) in the original [obsidian-mcp-server](https://github.com/cyanheads/obsidian-mcp-server) project. All core functionality and architecture credit goes to the original author.
 
 **Enhancements in this fork:**
+- **Multi-Vault Support**: Simultaneous access to multiple Obsidian vaults with vault-specific routing
 - Claude.ai Remote MCP integration and compatibility fixes
 - Tailscale Funnel integration for secure remote access
-- Enhanced HTTP transport layer with simplified authentication
+- Enhanced HTTP transport layer with authentication separation (MCP_AUTH_KEY)
 - Advanced task querying with Tasks plugin integration
 - **5 New Advanced Tools**: Periodic notes, block references, graph analysis, template system, and smart linking
 - Production-ready configuration for enterprise use
