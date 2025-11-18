@@ -168,6 +168,9 @@ If running directly, they can be set in a `.env` file in the project root or dir
 | `MCP_HTTP_HOST`                       | Host for the HTTP server.                                 | No                | `127.0.0.1`              |
 | `MCP_HTTP_STATELESS`                  | Enable stateless mode for Claude.ai compatibility.        | No                | `false`                  |
 | `MCP_ALLOWED_ORIGINS`                 | Comma-separated origins for CORS. **Set for production.** | No                | (none)                   |
+| `CHATGPT_LAYER_ENABLED`               | Set to `true` to serve the ChatGPT manifest plus JSON action endpoint. | No | `false` |
+| `CHATGPT_MANIFEST_PATH`               | HTTP path that exposes the ChatGPT manifest JSON.         | No                | `/.well-known/obsidian-chatgpt-manifest.json` |
+| `CHATGPT_ACTIONS_PATH`                | HTTP path for ChatGPT JSON actions (POST).                | No                | `/chatgpt/actions`       |
 | `MCP_LOG_LEVEL`                       | Logging level (`debug`, `info`, `error`, etc.).           | No                | `info`                   |
 | `OBSIDIAN_VERIFY_SSL`                 | Set to `false` to disable SSL verification.               | No                | `true`                   |
 | `OBSIDIAN_ENABLE_CACHE`               | Set to `true` to enable the in-memory vault cache.        | No                | `true`                   |
@@ -390,6 +393,61 @@ Use obsidian_dataview_query with vault="work" to run: TABLE file.name FROM #meet
 ```
 
 > **🚀 Pro Tip**: For production use, set up [automatic startup on boot](./scripts/autostart/README.md) so your server and Tailscale Funnel start automatically without manual intervention.
+
+## 🤖 ChatGPT MCP Layer
+
+Claude connects directly to `/mcp`, but ChatGPT’s Actions workflow expects an HTTP manifest plus REST-style JSON endpoints. The ChatGPT layer wraps the existing MCP server so you can reuse all transports, vault routing, and task logic without duplicating code.
+
+### Enabling the layer
+
+1. Add `CHATGPT_LAYER_ENABLED=true` to your environment (other knobs: `CHATGPT_MANIFEST_PATH`, `CHATGPT_ACTIONS_PATH`).
+2. Restart the server (`npm run build && npm run start:http`).
+3. Fetch the manifest to confirm availability:
+   ```bash
+   curl "http://127.0.0.1:3010/.well-known/obsidian-chatgpt-manifest.json"
+   ```
+
+The manifest advertises the MCP endpoint plus a single JSON actions route (`/chatgpt/actions`). Both endpoints reuse the same `MCP_AUTH_KEY` query parameter, so you can deploy Tailscale/Claude and ChatGPT in parallel without new auth plumbing.
+
+### Available ChatGPT actions
+
+| Action        | Description                                                                                 | Backed By                         |
+| :------------ | :------------------------------------------------------------------------------------------ | :-------------------------------- |
+| `searchNotes` | Global search with regex/date filters, pagination, and cache fallback.                      | `processObsidianGlobalSearch`     |
+| `fetchPage`   | Fetch markdown or JSON for a note.                                                          | `ObsidianRestApiService.getFileContent` |
+| `updatePage`  | Append, prepend, or overwrite a note via whole-file writes.                                 | `ObsidianRestApiService` methods  |
+| `taskQuery`   | Tasks plugin query engine with summaries and formatted output.                              | `obsidianTaskQueryLogic`          |
+| `taskCreate`  | Rich task insertion (headings, periodic notes, metadata).                                   | `obsidianCreateTaskLogic`         |
+| `taskUpdate`  | Update status/metadata or relocate an existing task.                                        | `obsidianUpdateTaskLogic`         |
+
+All actions accept an optional `vault` field (defaults to the first configured vault). Requests are JSON payloads of the form:
+
+```json
+POST /chatgpt/actions?api_key=YOUR_MCP_AUTH_KEY
+{
+  "action": "searchNotes",
+  "vault": "work",
+  "parameters": {
+    "query": "project alpha",
+    "searchInPath": "Projects/Alpha",
+    "modified_since": "last week",
+    "pageSize": 20
+  }
+}
+```
+
+Responses wrap the existing tool result objects:
+
+```json
+{
+  "success": true,
+  "action": "searchNotes",
+  "vault": "work",
+  "data": { "results": [...], "totalFilesFound": 5, "currentPage": 1, ... }
+}
+```
+
+Use the manifest output inside ChatGPT’s Actions editor (or any HTTP client) to describe the available capabilities while keeping Claude/Tailscale flows unchanged.
 
 ## Project Structure
 

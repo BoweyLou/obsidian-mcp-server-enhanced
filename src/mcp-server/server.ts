@@ -219,6 +219,7 @@ async function startTransport(
     const httpServerInstance = await startHttpTransport(
       mcpServerFactory,
       context,
+      vaultManager,
     );
     return httpServerInstance; // Return the http.Server instance.
   }

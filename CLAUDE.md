@@ -113,6 +113,25 @@ tailscale funnel 3010
 ./scripts/health-check.sh
 ```
 
+## ChatGPT Actions Layer
+
+- **Enable**: `CHATGPT_LAYER_ENABLED=true` (optional overrides: `CHATGPT_MANIFEST_PATH`, `CHATGPT_ACTIONS_PATH`). Restart after changing envs.
+- **Manifest**: `curl http://127.0.0.1:3010/.well-known/obsidian-chatgpt-manifest.json` to verify (path controlled via env).
+- **Actions endpoint**: `POST /chatgpt/actions?api_key=YOUR_MCP_AUTH_KEY` with JSON body:
+  ```json
+  {
+    "action": "taskQuery",
+    "vault": "personal",
+    "parameters": {
+      "status": "incomplete",
+      "dateRange": "today",
+      "format": "table"
+    }
+  }
+  ```
+- **Supported actions**: `searchNotes`, `fetchPage`, `updatePage`, `taskQuery`, `taskCreate`, `taskUpdate` – each calls the same MCP logic as the Claude tools.
+- **Auth story**: Shares `MCP_AUTH_KEY` query parameter with the `/mcp` endpoint, meaning Claude Remote + ChatGPT Actions can coexist on the same port/host without extra secrets.
+
 ## Architecture Overview
 
 ### Core Structure

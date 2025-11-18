@@ -15,6 +15,8 @@ import {
   RequestContext,
   requestContextService,
 } from "../../utils/index.js";
+import { VaultManager } from "../../services/vaultManager/index.js";
+import { handleChatGptLayerRequest } from "../../chatgpt/layer.js";
 
 const HTTP_PORT = config.mcpHttpPort;
 const HTTP_HOST = config.mcpHttpHost;
@@ -131,6 +133,7 @@ async function parseJsonBody(req: http.IncomingMessage): Promise<any> {
 export async function startHttpTransport(
   createServerInstanceFn: () => Promise<McpServer>,
   parentContext: RequestContext,
+  vaultManager: VaultManager,
 ): Promise<http.Server> {
   const transportContext = requestContextService.createRequestContext({
     ...parentContext,
@@ -178,6 +181,21 @@ export async function startHttpTransport(
       });
       logger.info(`Incoming HTTP request: ${req.method} ${req.url}`, requestContext);
       
+      if (
+        await handleChatGptLayerRequest({
+          req,
+          res,
+          url,
+          parentContext: requestContext,
+          parseJsonBody: () => parseJsonBody(req),
+          ensureAuthenticated: () => validateApiKey(req, url),
+          vaultManager,
+          mcpEndpointPath: MCP_ENDPOINT_PATH,
+        })
+      ) {
+        return;
+      }
+
       // Only handle our MCP endpoint
       if (url.pathname !== MCP_ENDPOINT_PATH) {
         res.writeHead(404);

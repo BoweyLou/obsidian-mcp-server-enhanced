@@ -93,6 +93,14 @@ const EnvSchema = z.object({
     .transform((val) => val.toLowerCase() === "true")
     .default("false"),
   MCP_ALLOWED_ORIGINS: z.string().optional(),
+  CHATGPT_LAYER_ENABLED: z
+    .string()
+    .transform((val) => val.toLowerCase() === "true")
+    .default("false"),
+  CHATGPT_MANIFEST_PATH: z
+    .string()
+    .default("/.well-known/obsidian-chatgpt-manifest.json"),
+  CHATGPT_ACTIONS_PATH: z.string().default("/chatgpt/actions"),
   MCP_AUTH_MODE: z.enum(["jwt", "oauth"]).optional(),
   MCP_AUTH_SECRET_KEY: z
     .string()
@@ -296,6 +304,9 @@ export const config = {
   mcpAllowedOrigins: env.MCP_ALLOWED_ORIGINS?.split(",")
     .map((origin) => origin.trim())
     .filter(Boolean),
+  chatgptLayerEnabled: env.CHATGPT_LAYER_ENABLED,
+  chatgptManifestPath: env.CHATGPT_MANIFEST_PATH,
+  chatgptActionsPath: env.CHATGPT_ACTIONS_PATH,
   mcpAuthMode: env.MCP_AUTH_MODE,
   mcpAuthSecretKey: env.MCP_AUTH_SECRET_KEY,
   oauthIssuerUrl: env.OAUTH_ISSUER_URL,
