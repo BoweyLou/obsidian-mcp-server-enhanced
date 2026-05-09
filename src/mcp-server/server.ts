@@ -20,6 +20,7 @@ import http from "http";
 import { config, environment } from "../config/index.js";
 // Import core utilities: ErrorHandler, logger, requestContextService.
 import { ErrorHandler, logger, requestContextService } from "../utils/index.js";
+import { instrumentMcpServerTools } from "../utils/internal/jsonlAuditLogger.js";
 // Import the Obsidian service
 import { ObsidianRestApiService } from "../services/obsidianRestAPI/index.js";
 // Import the Vault Cache service
@@ -45,6 +46,7 @@ import { registerObsidianBlockReferenceTool } from "./tools/obsidianBlockReferen
 import { registerObsidianGraphAnalysisTool } from "./tools/obsidianGraphAnalysisTool/index.js";
 import { registerObsidianTemplateSystemTool } from "./tools/obsidianTemplateSystemTool/index.js";
 import { registerObsidianSmartLinkingTool } from "./tools/obsidianSmartLinkingTool/index.js";
+import { registerObsidianBatchReadFilesTool } from "./tools/obsidianBatchReadFilesTool/index.js";
 // Import transport setup functions.
 import { startHttpTransport } from "./transports/httpTransportNative.js";
 import { connectStdioTransport } from "./transports/stdioTransport.js";
@@ -106,45 +108,36 @@ async function createMcpServerInstance(
     },
   );
 
+  // T3.1: wrap every tool handler with the JSONL audit logger before registration.
+  // No-op when MCP_AUDIT_LOG_ENABLED=false.
+  instrumentMcpServerTools(server);
+
   try {
     logger.debug(
       "Registering resources and tools using VaultManager...",
       context,
     );
-    
-    // Get default services for compatibility with tools not yet updated
-    const defaultObsidianService = vaultManager.getVaultService();
-    const defaultVaultCacheService = vaultManager.getVaultCacheService();
-    
+
     // Register tools that have been updated to use VaultManager
     await registerObsidianReadFileTool(server, vaultManager);
     await registerObsidianListFilesTool(server, vaultManager);
     await registerObsidianDeleteFileTool(server, vaultManager);
     await registerObsidianTaskQueryTool(server, vaultManager);
     await registerObsidianTasksQueryBuilderTool(server, vaultManager);
-    
-    // Register tools using compatibility bridge (legacy signatures)
-    if (config.obsidianEnableCache && defaultVaultCacheService) {
-      await registerObsidianGlobalSearchTool(server, defaultObsidianService, defaultVaultCacheService);
-    } else {
-      logger.warning(
-        "Skipping registration of 'obsidian_global_search' because the Vault Cache Service is disabled.",
-        context,
-      );
-    }
-    
-    await registerObsidianSearchReplaceTool(server, defaultObsidianService, defaultVaultCacheService);
-    await registerObsidianUpdateFileTool(server, defaultObsidianService, defaultVaultCacheService);
-    await registerObsidianManageFrontmatterTool(server, defaultObsidianService, defaultVaultCacheService);
-    await registerObsidianManageTagsTool(server, defaultObsidianService, defaultVaultCacheService);
-    await registerObsidianDataviewQueryTool(server, defaultObsidianService);
-    await registerObsidianCreateTaskTool(server, defaultObsidianService);
-    await registerObsidianUpdateTaskTool(server, defaultObsidianService);
-    await registerObsidianPeriodicNotesTool(server, defaultObsidianService);
-    await registerObsidianBlockReferenceTool(server, defaultObsidianService);
-    await registerObsidianGraphAnalysisTool(server, defaultObsidianService);
-    await registerObsidianTemplateSystemTool(server, defaultObsidianService);
-    await registerObsidianSmartLinkingTool(server, defaultObsidianService);
+    await registerObsidianBatchReadFilesTool(server, vaultManager);
+    await registerObsidianSearchReplaceTool(server, vaultManager);
+    await registerObsidianUpdateFileTool(server, vaultManager);
+    await registerObsidianManageFrontmatterTool(server, vaultManager);
+    await registerObsidianManageTagsTool(server, vaultManager);
+    await registerObsidianCreateTaskTool(server, vaultManager);
+    await registerObsidianUpdateTaskTool(server, vaultManager);
+    await registerObsidianGlobalSearchTool(server, vaultManager);
+    await registerObsidianDataviewQueryTool(server, vaultManager);
+    await registerObsidianPeriodicNotesTool(server, vaultManager);
+    await registerObsidianBlockReferenceTool(server, vaultManager);
+    await registerObsidianGraphAnalysisTool(server, vaultManager);
+    await registerObsidianTemplateSystemTool(server, vaultManager);
+    await registerObsidianSmartLinkingTool(server, vaultManager);
 
     logger.info("Resources and tools registered successfully", context);
 

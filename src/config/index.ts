@@ -137,6 +137,10 @@ const EnvSchema = z.object({
     .int()
     .positive()
     .default(30000),
+  MCP_AUDIT_LOG_ENABLED: z
+    .string()
+    .transform((val) => val.toLowerCase() === "true")
+    .default("true"),
 });
 
 const parsedEnv = EnvSchema.safeParse(process.env);
@@ -324,6 +328,7 @@ export const config = {
   obsidianCacheRefreshIntervalMin: env.OBSIDIAN_CACHE_REFRESH_INTERVAL_MIN,
   obsidianEnableCache: env.OBSIDIAN_ENABLE_CACHE,
   obsidianApiSearchTimeoutMs: env.OBSIDIAN_API_SEARCH_TIMEOUT_MS,
+  auditLogEnabled: env.MCP_AUDIT_LOG_ENABLED,
 };
 
 /**

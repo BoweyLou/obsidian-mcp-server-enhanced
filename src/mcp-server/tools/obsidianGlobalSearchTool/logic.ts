@@ -2,10 +2,9 @@ import path from "node:path/posix";
 import { z } from "zod";
 import {
   NoteJson,
-  ObsidianRestApiService,
   SimpleSearchResult,
 } from "../../../services/obsidianRestAPI/index.js"; // Removed NoteStat import
-import { VaultCacheService } from "../../../services/obsidianRestAPI/vaultCache/index.js";
+import { VaultManager } from "../../../services/vaultManager/index.js";
 import { BaseErrorCode, McpError } from "../../../types-global/errors.js";
 // Import formatTimestamp utility
 import { config } from "../../../config/index.js";
@@ -83,6 +82,12 @@ export const ObsidianGlobalSearchInputSchema = z
       .optional()
       .default(5)
       .describe("Maximum number of matches to show per file. Defaults to 5."),
+    vault: z
+      .string()
+      .optional()
+      .describe(
+        'The ID of the vault to search in (e.g., "personal", "work"). If not specified, uses the default vault.',
+      ),
   })
   .describe(
     "Performs search across vault content using text or regex. Supports filtering by modification date, directory path, pagination, and limiting matches per file.",
@@ -192,14 +197,26 @@ const API_SEARCH_TIMEOUT_MS = config.obsidianApiSearchTimeoutMs;
 export const processObsidianGlobalSearch = async (
   params: ObsidianGlobalSearchInput,
   context: RequestContext,
-  obsidianService: ObsidianRestApiService,
-  vaultCacheService: VaultCacheService | undefined,
+  vaultManager: VaultManager,
 ): Promise<ObsidianGlobalSearchResponse> => {
   const operation = "processObsidianGlobalSearch";
   const opContext = { ...context, operation };
+
+  const obsidianService = vaultManager.getVaultService(params.vault, context);
+  const vaultCacheService = vaultManager.getVaultCacheService(
+    params.vault,
+    context,
+  );
+  const vaultConfig = vaultManager.getVaultConfig(params.vault);
+
   logger.info(
     `Processing obsidian_global_search request: "${params.query}" (API-first)`,
-    { ...opContext, params: sanitizeInputForLogging(params) },
+    {
+      ...opContext,
+      params: sanitizeInputForLogging(params),
+      vaultId: vaultConfig.id,
+      vaultName: vaultConfig.name,
+    },
   );
 
   let sinceDate: Date | null = null;

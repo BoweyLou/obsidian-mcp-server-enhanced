@@ -6,7 +6,7 @@ import { z } from "zod";
 
 import { RequestContext, requestContextService } from "../../../utils/index.js";
 import { BaseErrorCode, McpError } from "../../../types-global/errors.js";
-import { ObsidianRestApiService } from "../../../services/obsidianRestAPI/index.js";
+import { VaultManager } from "../../../services/vaultManager/index.js";
 
 import { obsidianPeriodicNotesToolDefinition } from "./registration.js";
 import { executePeriodicNotesOperation, PeriodicNotesOperation } from "./logic.js";
@@ -22,6 +22,12 @@ const PeriodicNotesArgsSchema = z.object({
   format: z.enum(["markdown", "json"]).default("markdown"),
   template: z.string().optional(),
   createIfNotExists: z.boolean().default(false),
+  vault: z
+    .string()
+    .optional()
+    .describe(
+      'The ID of the vault to operate on (e.g., "personal", "work"). If not specified, uses the default vault.',
+    ),
 });
 
 
@@ -30,7 +36,7 @@ const PeriodicNotesArgsSchema = z.object({
  */
 export async function registerObsidianPeriodicNotesTool(
   server: any,
-  obsidianService: ObsidianRestApiService,
+  vaultManager: VaultManager,
 ): Promise<void> {
   const toolName = "obsidian_periodic_notes";
   const toolDescription = obsidianPeriodicNotesToolDefinition.description;
@@ -43,7 +49,8 @@ export async function registerObsidianPeriodicNotesTool(
       const context = requestContextService.createRequestContext({
         operation: toolName,
       });
-      
+      const obsidianService = vaultManager.getVaultService(params.vault, context);
+
       const operation: PeriodicNotesOperation = {
         operation: params.operation,
         period: params.period,

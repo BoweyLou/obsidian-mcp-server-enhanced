@@ -1,19 +1,15 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import {
-  ObsidianRestApiService,
-  VaultCacheService,
-} from "../../../services/obsidianRestAPI/index.js";
+import { VaultManager } from "../../../services/vaultManager/index.js";
 import { BaseErrorCode, McpError } from "../../../types-global/errors.js";
 import {
+  buildWriteLockKey,
   ErrorHandler,
   logger,
   RequestContext,
   requestContextService,
+  runWriteTool,
 } from "../../../utils/index.js";
-import type {
-  ObsidianManageTagsInput,
-  ObsidianManageTagsResponse,
-} from "./logic.js";
+import type { ObsidianManageTagsInput } from "./logic.js";
 import {
   ManageTagsInputSchema,
   ObsidianManageTagsInputSchemaShape,
@@ -22,8 +18,7 @@ import {
 
 export const registerObsidianManageTagsTool = async (
   server: McpServer,
-  obsidianService: ObsidianRestApiService,
-  vaultCacheService: VaultCacheService | undefined,
+  vaultManager: VaultManager,
 ): Promise<void> => {
   const toolName = "obsidian_manage_tags";
   const toolDescription =
@@ -54,46 +49,27 @@ export const registerObsidianManageTagsTool = async (
             });
           logger.debug(`Handling '${toolName}' request`, handlerContext);
 
-          return await ErrorHandler.tryCatch(
-            async () => {
+          // T1.2/T1.3/T1.4/T1.5 — runWriteTool wraps validation, retry,
+          // verification, idempotency caching, and structured error mapping.
+          return await runWriteTool({
+            toolName,
+            idempotencyKey: params.idempotency_key,
+            lockKey: buildWriteLockKey(params.vault, params.filePath),
+            context: handlerContext,
+            errorContext: {
+              file: params.filePath,
+              op: params.operation,
+              tagCount: params.tags?.length ?? 0,
+            },
+            handler: async () => {
               const validatedParams = ManageTagsInputSchema.parse(params);
-
-              const response: ObsidianManageTagsResponse =
-                await processObsidianManageTags(
-                  validatedParams,
-                  handlerContext,
-                  obsidianService,
-                  vaultCacheService,
-                );
-              logger.debug(
-                `'${toolName}' processed successfully`,
+              return await processObsidianManageTags(
+                validatedParams,
                 handlerContext,
+                vaultManager,
               );
-
-              return {
-                content: [
-                  {
-                    type: "text",
-                    text: JSON.stringify(response, null, 2),
-                  },
-                ],
-                isError: false,
-              };
             },
-            {
-              operation: `processing ${toolName} handler`,
-              context: handlerContext,
-              input: params,
-              errorMapper: (error: unknown) =>
-                new McpError(
-                  error instanceof McpError
-                    ? error.code
-                    : BaseErrorCode.INTERNAL_ERROR,
-                  `Error processing ${toolName} tool: ${error instanceof Error ? error.message : "Unknown error"}`,
-                  { ...handlerContext },
-                ),
-            },
-          );
+          });
         },
       );
 

@@ -6,7 +6,7 @@ import { z } from "zod";
 
 import { RequestContext, requestContextService } from "../../../utils/index.js";
 import { BaseErrorCode, McpError } from "../../../types-global/errors.js";
-import { ObsidianRestApiService } from "../../../services/obsidianRestAPI/index.js";
+import { VaultManager } from "../../../services/vaultManager/index.js";
 
 import { obsidianSmartLinkingToolDefinition } from "./registration.js";
 import { executeSmartLinkingOperation, SmartLinkingOperation } from "./logic.js";
@@ -17,7 +17,7 @@ import { executeSmartLinkingOperation, SmartLinkingOperation } from "./logic.js"
 const SmartLinkingArgsSchema = z.object({
   operation: z.enum([
     "suggest_links_for_content",
-    "find_link_opportunities", 
+    "find_link_opportunities",
     "analyze_linkable_concepts",
     "suggest_backlinks",
     "recommend_tags",
@@ -32,6 +32,12 @@ const SmartLinkingArgsSchema = z.object({
   contextWindow: z.number().min(50).max(500).default(150),
   excludeFolders: z.array(z.string()).default([]),
   includeTagSuggestions: z.boolean().default(true),
+  vault: z
+    .string()
+    .optional()
+    .describe(
+      'The ID of the vault to operate on (e.g., "personal", "work"). If not specified, uses the default vault.',
+    ),
 });
 
 /**
@@ -39,7 +45,7 @@ const SmartLinkingArgsSchema = z.object({
  */
 export async function registerObsidianSmartLinkingTool(
   server: any,
-  obsidianService: ObsidianRestApiService,
+  vaultManager: VaultManager,
 ): Promise<void> {
   const toolName = "obsidian_smart_linking";
   const toolDescription = obsidianSmartLinkingToolDefinition.description;
@@ -52,7 +58,8 @@ export async function registerObsidianSmartLinkingTool(
       const context = requestContextService.createRequestContext({
         operation: toolName,
       });
-      
+      const obsidianService = vaultManager.getVaultService(params.vault, context);
+
       const operation: SmartLinkingOperation = {
         operation: params.operation,
         filePath: params.filePath,

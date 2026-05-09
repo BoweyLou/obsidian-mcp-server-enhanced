@@ -5,8 +5,7 @@
  */
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { ObsidianRestApiService } from "../../../services/obsidianRestAPI/index.js";
-import type { VaultCacheService } from "../../../services/obsidianRestAPI/vaultCache/index.js";
+import type { VaultManager } from "../../../services/vaultManager/index.js";
 import { BaseErrorCode, McpError } from "../../../types-global/errors.js";
 import {
   ErrorHandler,
@@ -35,8 +34,7 @@ import {
  */
 export async function registerObsidianGlobalSearchTool(
   server: McpServer,
-  obsidianService: ObsidianRestApiService,
-  vaultCacheService: VaultCacheService,
+  vaultManager: VaultManager,
 ): Promise<void> {
   const toolName = "obsidian_global_search";
   const toolDescription = `Performs search across the Obsidian vault using text or regex, primarily relying on the Obsidian REST API's simple search. Supports filtering by modification date, optionally restricting search to a specific directory path (recursively), pagination (page, pageSize), and limiting matches shown per file (maxMatchesPerFile). Returns a JSON object containing success status, a message, pagination details (currentPage, pageSize, totalPages), total file/match counts (before pagination), and an array of results. Each result includes the file path, filename, creation timestamp (ctime), modification timestamp (mtime), and an array of match context snippets (limited by maxMatchesPerFile). If there are multiple pages of results, it also includes an 'alsoFoundInFiles' array listing filenames found on other pages.`;
@@ -84,8 +82,7 @@ export async function registerObsidianGlobalSearchTool(
                 await processObsidianGlobalSearch(
                   params,
                   handlerContext,
-                  obsidianService,
-                  vaultCacheService,
+                  vaultManager,
                 );
               logger.debug(
                 `'${toolName}' processed successfully`,

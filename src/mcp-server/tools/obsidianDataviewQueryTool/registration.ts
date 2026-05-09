@@ -5,7 +5,7 @@
  */
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { ObsidianRestApiService } from "../../../services/obsidianRestAPI/index.js";
+import { VaultManager } from "../../../services/vaultManager/index.js";
 import { BaseErrorCode, McpError } from "../../../types-global/errors.js";
 import {
   ErrorHandler,
@@ -33,7 +33,7 @@ import {
  */
 export const registerObsidianDataviewQueryTool = async (
   server: McpServer,
-  obsidianService: ObsidianRestApiService,
+  vaultManager: VaultManager,
 ): Promise<void> => {
   const toolName = "obsidian_dataview_query";
   const toolDescription = `Execute Dataview DQL (Dataview Query Language) queries against your Obsidian vault.
@@ -101,7 +101,7 @@ Note: Requires the Dataview plugin to be installed and enabled in Obsidian.`;
                 await obsidianDataviewQueryLogic(
                   params,
                   handlerContext,
-                  obsidianService,
+                  vaultManager,
                 );
 
               logger.debug(

@@ -7,6 +7,7 @@
 import { z } from "zod";
 import { logger, RequestContext } from "../../../utils/index.js";
 import { ObsidianRestApiService } from "../../../services/obsidianRestAPI/index.js";
+import { VaultManager } from "../../../services/vaultManager/index.js";
 import { ComplexSearchResult } from "../../../services/obsidianRestAPI/types.js";
 
 /**
@@ -19,14 +20,20 @@ export const DataviewQueryInputSchema = z.object({
     .refine(
       (query) => {
         const trimmed = query.trim().toUpperCase();
-        return trimmed.startsWith("TABLE") || 
-               trimmed.startsWith("LIST") || 
+        return trimmed.startsWith("TABLE") ||
+               trimmed.startsWith("LIST") ||
                trimmed.startsWith("TASK") ||
                trimmed.startsWith("CALENDAR");
       },
       "Query must start with TABLE, LIST, TASK, or CALENDAR (Dataview DQL keywords)"
     ),
   format: z.enum(["table", "list", "raw"]).default("table"),
+  vault: z
+    .string()
+    .optional()
+    .describe(
+      'The ID of the vault to query (e.g., "personal", "work"). If not specified, uses the default vault.',
+    ),
 });
 
 /**
@@ -216,17 +223,22 @@ export async function executeDataviewQuery(
 export async function obsidianDataviewQueryLogic(
   input: DataviewQueryInput,
   context: RequestContext,
-  obsidianService: ObsidianRestApiService,
+  vaultManager: VaultManager,
 ): Promise<DataviewQueryResponse> {
+  const obsidianService = vaultManager.getVaultService(input.vault, context);
+  const vaultConfig = vaultManager.getVaultConfig(input.vault);
+
   logger.debug("Processing Dataview query input", {
     ...context,
     operation: "dataviewQuery",
     hasQuery: !!input.query,
     format: input.format,
+    vaultId: vaultConfig.id,
+    vaultName: vaultConfig.name,
   });
 
   // Execute the query
   const result = await executeDataviewQuery(obsidianService, input, context);
-  
+
   return result;
 }

@@ -1,19 +1,15 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import {
-  ObsidianRestApiService,
-  VaultCacheService,
-} from "../../../services/obsidianRestAPI/index.js";
+import { VaultManager } from "../../../services/vaultManager/index.js";
 import { BaseErrorCode, McpError } from "../../../types-global/errors.js";
 import {
+  buildWriteLockKey,
   ErrorHandler,
   logger,
   RequestContext,
   requestContextService,
+  runWriteTool,
 } from "../../../utils/index.js";
-import type {
-  ObsidianManageFrontmatterInput,
-  ObsidianManageFrontmatterResponse,
-} from "./logic.js";
+import type { ObsidianManageFrontmatterInput } from "./logic.js";
 import {
   ManageFrontmatterInputSchema,
   ObsidianManageFrontmatterInputSchemaShape,
@@ -22,8 +18,7 @@ import {
 
 export const registerObsidianManageFrontmatterTool = async (
   server: McpServer,
-  obsidianService: ObsidianRestApiService,
-  vaultCacheService: VaultCacheService | undefined,
+  vaultManager: VaultManager,
 ): Promise<void> => {
   const toolName = "obsidian_manage_frontmatter";
   const toolDescription =
@@ -54,47 +49,37 @@ export const registerObsidianManageFrontmatterTool = async (
             });
           logger.debug(`Handling '${toolName}' request`, handlerContext);
 
-          return await ErrorHandler.tryCatch(
-            async () => {
+          // T1.2/T1.3/T1.4/T1.5 — runWriteTool wraps validation, retry,
+          // verification, idempotency caching, and structured error mapping.
+          // The 'get' op is read-only; we still run it through the wrapper
+          // for uniform error shape, but it skips the idempotency cache
+          // unless the caller chose to pass a key.
+          return await runWriteTool({
+            toolName,
+            idempotencyKey: params.idempotency_key,
+            // 'get' is read-only and doesn't need serialization, but locking
+            // a read against a concurrent write is harmless and keeps the
+            // wiring uniform across operations.
+            lockKey:
+              params.operation === "get"
+                ? undefined
+                : buildWriteLockKey(params.vault, params.filePath),
+            context: handlerContext,
+            errorContext: {
+              file: params.filePath,
+              op: params.operation,
+              key: params.key,
+            },
+            handler: async () => {
               const validatedParams =
                 ManageFrontmatterInputSchema.parse(params);
-
-              const response: ObsidianManageFrontmatterResponse =
-                await processObsidianManageFrontmatter(
-                  validatedParams,
-                  handlerContext,
-                  obsidianService,
-                  vaultCacheService,
-                );
-              logger.debug(
-                `'${toolName}' processed successfully`,
+              return await processObsidianManageFrontmatter(
+                validatedParams,
                 handlerContext,
+                vaultManager,
               );
-
-              return {
-                content: [
-                  {
-                    type: "text",
-                    text: JSON.stringify(response, null, 2),
-                  },
-                ],
-                isError: false,
-              };
             },
-            {
-              operation: `processing ${toolName} handler`,
-              context: handlerContext,
-              input: params,
-              errorMapper: (error: unknown) =>
-                new McpError(
-                  error instanceof McpError
-                    ? error.code
-                    : BaseErrorCode.INTERNAL_ERROR,
-                  `Error processing ${toolName} tool: ${error instanceof Error ? error.message : "Unknown error"}`,
-                  { ...handlerContext },
-                ),
-            },
-          );
+          });
         },
       );
 

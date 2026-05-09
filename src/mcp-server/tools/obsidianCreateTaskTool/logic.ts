@@ -6,11 +6,21 @@
 
 import { z } from "zod";
 import { ObsidianRestApiService } from "../../../services/obsidianRestAPI/index.js";
+import { VaultManager } from "../../../services/vaultManager/index.js";
 import { BaseErrorCode, McpError } from "../../../types-global/errors.js";
 import {
+  assertContentHash,
+  buildStructuredError,
   ErrorHandler,
+  expectedContentHashDescription,
+  HashMismatchError,
   logger,
   RequestContext,
+  retryWithExponentialBackoff,
+  verifyContentMatch,
+  VerificationResult,
+  WriteLockTimeoutError,
+  WriteRetryExhaustedError,
 } from "../../../utils/index.js";
 import * as chrono from "chrono-node";
 
@@ -44,6 +54,24 @@ export const CreateTaskInputSchema = z.object({
   insertAt: z.enum(["top", "bottom", "after-heading"]).default("bottom"),
   indentLevel: z.number().int().min(0).max(6).default(0),
   listStyle: z.enum(["-", "*", "1."]).default("-"),
+
+  // Vault selection (multi-vault support)
+  vault: z
+    .string()
+    .optional()
+    .describe(
+      'The ID of the vault to write to (e.g., "personal", "work"). If not specified, uses the default vault.',
+    ),
+  idempotency_key: z
+    .string()
+    .optional()
+    .describe(
+      "Optional client-supplied UUID. If the same key is sent twice within 60s, the second call returns the cached result.",
+    ),
+  expected_content_hash: z
+    .string()
+    .optional()
+    .describe(expectedContentHashDescription),
 });
 
 export type CreateTaskInput = z.infer<typeof CreateTaskInputSchema>;
@@ -68,6 +96,8 @@ export interface CreateTaskResponse {
     recurrence?: string;
   };
   executionTime: string;
+  /** T1.3 — read-back verification result. */
+  verification?: VerificationResult;
 }
 
 /**
@@ -295,10 +325,13 @@ function findInsertionPoint(
 export async function obsidianCreateTaskLogic(
   input: CreateTaskInput,
   context: RequestContext,
-  obsidianService: ObsidianRestApiService
+  vaultManager: VaultManager
 ): Promise<CreateTaskResponse> {
   const startTime = Date.now();
-  
+
+  const obsidianService = vaultManager.getVaultService(input.vault, context);
+  const vaultConfig = vaultManager.getVaultConfig(input.vault);
+
   logger.info("Creating new task with Obsidian Tasks plugin format", {
     ...context,
     operation: "createTask",
@@ -311,6 +344,8 @@ export async function obsidianCreateTaskLogic(
       useActiveFile: input.useActiveFile,
       usePeriodicNote: input.usePeriodicNote,
     },
+    vaultId: vaultConfig.id,
+    vaultName: vaultConfig.name,
   });
 
   try {
@@ -327,15 +362,41 @@ export async function obsidianCreateTaskLogic(
     
     // Step 3: Get current file content
     let currentContent = "";
+    let fileExisted = false;
     try {
       const fileContent = await obsidianService.getFileContent(targetFile, "markdown", context);
       currentContent = typeof fileContent === "string" ? fileContent : fileContent.content;
+      fileExisted = true;
     } catch (error) {
       // File might not exist, which is fine - we'll create it
       logger.info(`File ${targetFile} doesn't exist, will create new file`, context);
       currentContent = "";
     }
-    
+
+    // T2.3: pre-flight hash check.
+    if (input.expected_content_hash) {
+      if (!fileExisted) {
+        // Caller expected a specific prior state but the file is missing.
+        throw new HashMismatchError(
+          buildStructuredError(
+            "hash_mismatch",
+            `File '${targetFile}' does not exist; expected_content_hash cannot be satisfied.`,
+            {
+              operation: "preflightContentHash",
+              file: targetFile,
+              expected_hash: input.expected_content_hash,
+            },
+          ),
+        );
+      }
+      assertContentHash(
+        currentContent,
+        input.expected_content_hash,
+        targetFile,
+        context,
+      );
+    }
+
     // Step 4: Find insertion point
     const { lineNumber, content } = findInsertionPoint(currentContent, input);
     
@@ -344,13 +405,32 @@ export async function obsidianCreateTaskLogic(
     lines.splice(lineNumber, 0, taskLine);
     const updatedContent = lines.join('\n');
     
-    // Step 6: Write the updated content
-    await obsidianService.updateFileContent(
-      targetFile,
-      updatedContent,
-      context
+    // Step 6: Write the updated content (T1.2 retry).
+    await retryWithExponentialBackoff(
+      () =>
+        obsidianService.updateFileContent(targetFile, updatedContent, context),
+      {
+        operationName: "obsidian_create_task:write",
+        context,
+        errorContext: { file: targetFile, lineNumber: lineNumber + 1 },
+      },
     );
-    
+
+    // T1.3: hash-verify post-write content matches what we sent.
+    const verification = await verifyContentMatch(
+      { kind: "filePath", path: targetFile },
+      updatedContent,
+      obsidianService,
+      { ...context, operation: "verifyContentMatch" },
+    );
+    if (!verification.verified) {
+      throw new McpError(
+        BaseErrorCode.INTERNAL_ERROR,
+        `Task write reported success but read-back verification failed: ${verification.reason}`,
+        { ...context, verification_error: true, verification },
+      );
+    }
+
     const executionTime = `${Date.now() - startTime}ms`;
     
     logger.info("Task created successfully", {
@@ -381,16 +461,27 @@ export async function obsidianCreateTaskLogic(
       formattedTask: taskLine,
       metadata,
       executionTime,
+      verification,
     };
 
   } catch (error) {
     const executionTime = `${Date.now() - startTime}ms`;
-    
+
     logger.error("Task creation failed", {
       ...context,
       error: error instanceof Error ? error.message : String(error),
       executionTime,
     });
+
+    // Preserve T2 structured error types so the wrapper can render them as
+    // hash_mismatch / lock_timeout / retry_exhausted instead of internal_error.
+    if (
+      error instanceof HashMismatchError ||
+      error instanceof WriteLockTimeoutError ||
+      error instanceof WriteRetryExhaustedError
+    ) {
+      throw error;
+    }
 
     if (error instanceof McpError) {
       throw error;

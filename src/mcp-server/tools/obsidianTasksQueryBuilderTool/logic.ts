@@ -222,13 +222,21 @@ async function executeTasksQuery(
   context: RequestContext
 ): Promise<any[]> {
   try {
-    // First, try to execute the query using Dataview integration
-    // This is a fallback approach since we can't directly access Tasks plugin API
+    // Execute via Dataview. Notes:
+    //  - The Local REST API's /search/ endpoint rejects "TABLE WITHOUT ID";
+    //    use plain TABLE. The implicit file ID column is harmless — named
+    //    columns are still addressable by name on result.result.
+    //  - Avoid Tasks-plugin-specific fields like task.status.symbol and
+    //    task.priority.name, which only exist when the Tasks plugin's
+    //    Dataview extension is active. With vanilla Dataview, task.status is
+    //    the symbol char (string) and task.priority is undefined, so
+    //    accessing .symbol/.name throws "string indexing requires a numeric
+    //    index". Priority is encoded in task.text as an emoji and can be
+    //    recovered downstream if needed.
     const dataviewQuery = `
-TABLE WITHOUT ID 
+TABLE
   task.text as Text,
-  task.status.symbol as Status,
-  task.priority.name as Priority,
+  task.status as Status,
   task.due as DueDate,
   task.scheduled as ScheduledDate,
   task.start as StartDate,

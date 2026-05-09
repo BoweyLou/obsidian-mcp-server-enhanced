@@ -171,3 +171,14 @@ docs/api/
 
 logs/*.pid
 test-*.js
+
+# T3.1 JSONL audit logger
+logs/_mcp_server_log.jsonl
+logs/_mcp_server_log.jsonl.*
+
+# Stray credential files
+*.key
+*.pem
+*.token
+*secret*
+*credential*

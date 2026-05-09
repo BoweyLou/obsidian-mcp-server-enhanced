@@ -5,19 +5,20 @@
  */
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { ObsidianRestApiService } from "../../../services/obsidianRestAPI/index.js";
+import { VaultManager } from "../../../services/vaultManager/index.js";
 import { BaseErrorCode, McpError } from "../../../types-global/errors.js";
 import {
+  buildWriteLockKey,
   ErrorHandler,
   logger,
   RequestContext,
   requestContextService,
+  runWriteTool,
 } from "../../../utils/index.js";
 import {
   UpdateTaskInputSchema,
   obsidianUpdateTaskLogic,
   type UpdateTaskInput,
-  type UpdateTaskResponse,
 } from "./logic.js";
 
 /**
@@ -33,7 +34,7 @@ import {
  */
 export const registerObsidianUpdateTaskTool = async (
   server: McpServer,
-  obsidianService: ObsidianRestApiService,
+  vaultManager: VaultManager,
 ): Promise<void> => {
   const toolName = "obsidian_update_task";
   const toolDescription = `Update and modify existing tasks in Obsidian with comprehensive operation support.
@@ -138,39 +139,26 @@ This tool provides extensive task modification capabilities with precise task id
 
           logger.debug(`Handling '${toolName}' request`, handlerContext);
 
-          // Wrap the core logic execution in a tryCatch block
-          return await ErrorHandler.tryCatch(
-            async () => {
-              // Execute the task update logic
-              const response: UpdateTaskResponse =
-                await obsidianUpdateTaskLogic(
-                  params,
-                  handlerContext,
-                  obsidianService,
-                );
-
-              logger.debug(
-                `'${toolName}' processed successfully`,
+          // T1.2/T1.3/T1.4/T1.5 — runWriteTool wraps validation, retry,
+          // verification, idempotency caching, and structured error mapping.
+          return await runWriteTool({
+            toolName,
+            idempotencyKey: params.idempotency_key,
+            lockKey: buildWriteLockKey(params.vault, params.filePath),
+            context: handlerContext,
+            errorContext: {
+              file: params.filePath,
+              op: params.operation,
+              lineNumber: params.lineNumber,
+            },
+            handler: async () => {
+              return await obsidianUpdateTaskLogic(
+                params,
                 handlerContext,
+                vaultManager,
               );
-
-              // Format the successful response object into the required MCP CallToolResult structure
-              return {
-                content: [
-                  {
-                    type: "text",
-                    text: JSON.stringify(response, null, 2),
-                  },
-                ],
-                isError: false,
-              };
             },
-            {
-              operation: `processing ${toolName} handler`,
-              context: handlerContext,
-              input: { ...params, taskText: params.taskText?.substring(0, 50) },
-            },
-          );
+          });
         },
       );
 

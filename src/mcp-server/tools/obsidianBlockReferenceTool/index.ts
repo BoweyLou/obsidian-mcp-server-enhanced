@@ -6,7 +6,7 @@ import { z } from "zod";
 
 import { RequestContext, requestContextService } from "../../../utils/index.js";
 import { BaseErrorCode, McpError } from "../../../types-global/errors.js";
-import { ObsidianRestApiService } from "../../../services/obsidianRestAPI/index.js";
+import { VaultManager } from "../../../services/vaultManager/index.js";
 
 import { obsidianBlockReferenceToolDefinition } from "./registration.js";
 import { executeBlockReferenceOperation, BlockReferenceOperation } from "./logic.js";
@@ -24,6 +24,12 @@ const BlockReferenceArgsSchema = z.object({
   position: z.enum(["start", "end", "after_heading", "before_next_heading"]).default("end"),
   createHeading: z.boolean().default(false),
   includeSubheadings: z.boolean().default(false),
+  vault: z
+    .string()
+    .optional()
+    .describe(
+      'The ID of the vault to operate on (e.g., "personal", "work"). If not specified, uses the default vault.',
+    ),
 });
 
 /**
@@ -31,7 +37,7 @@ const BlockReferenceArgsSchema = z.object({
  */
 export async function registerObsidianBlockReferenceTool(
   server: any,
-  obsidianService: ObsidianRestApiService,
+  vaultManager: VaultManager,
 ): Promise<void> {
   const toolName = "obsidian_block_reference";
   const toolDescription = obsidianBlockReferenceToolDefinition.description;
@@ -44,7 +50,8 @@ export async function registerObsidianBlockReferenceTool(
       const context = requestContextService.createRequestContext({
         operation: toolName,
       });
-      
+      const obsidianService = vaultManager.getVaultService(params.vault, context);
+
       const operation: BlockReferenceOperation = {
         operation: params.operation,
         filePath: params.filePath,

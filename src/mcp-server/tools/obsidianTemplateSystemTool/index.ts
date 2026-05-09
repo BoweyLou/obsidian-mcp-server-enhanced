@@ -6,7 +6,7 @@ import { z } from "zod";
 
 import { RequestContext, requestContextService } from "../../../utils/index.js";
 import { BaseErrorCode, McpError } from "../../../types-global/errors.js";
-import { ObsidianRestApiService } from "../../../services/obsidianRestAPI/index.js";
+import { VaultManager } from "../../../services/vaultManager/index.js";
 
 import { obsidianTemplateSystemToolDefinition } from "./registration.js";
 import { executeTemplateSystemOperation, TemplateSystemOperation } from "./logic.js";
@@ -18,7 +18,7 @@ const TemplateSystemArgsSchema = z.object({
   operation: z.enum([
     "list_templates",
     "get_template",
-    "create_from_template", 
+    "create_from_template",
     "preview_template",
     "validate_template",
     "apply_template_variables"
@@ -30,6 +30,12 @@ const TemplateSystemArgsSchema = z.object({
   autoGenerateVariables: z.boolean().default(true),
   createFolders: z.boolean().default(true),
   overwriteExisting: z.boolean().default(false),
+  vault: z
+    .string()
+    .optional()
+    .describe(
+      'The ID of the vault to operate on (e.g., "personal", "work"). If not specified, uses the default vault.',
+    ),
 });
 
 /**
@@ -37,7 +43,7 @@ const TemplateSystemArgsSchema = z.object({
  */
 export async function registerObsidianTemplateSystemTool(
   server: any,
-  obsidianService: ObsidianRestApiService,
+  vaultManager: VaultManager,
 ): Promise<void> {
   const toolName = "obsidian_template_system";
   const toolDescription = obsidianTemplateSystemToolDefinition.description;
@@ -50,7 +56,8 @@ export async function registerObsidianTemplateSystemTool(
       const context = requestContextService.createRequestContext({
         operation: toolName,
       });
-      
+      const obsidianService = vaultManager.getVaultService(params.vault, context);
+
       const operation: TemplateSystemOperation = {
         operation: params.operation,
         templatePath: params.templatePath,

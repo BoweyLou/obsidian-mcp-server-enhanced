@@ -2,16 +2,15 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { VaultManager } from "../../../services/vaultManager/index.js";
 import { BaseErrorCode, McpError } from "../../../types-global/errors.js";
 import {
+  buildWriteLockKey,
   ErrorHandler,
   logger,
   RequestContext,
   requestContextService,
+  runWriteTool,
 } from "../../../utils/index.js";
 // Import necessary types, schema, and logic function from the logic file
-import type {
-  ObsidianDeleteFileInput,
-  ObsidianDeleteFileResponse,
-} from "./logic.js";
+import type { ObsidianDeleteFileInput } from "./logic.js";
 import {
   ObsidianDeleteFileInputSchema,
   processObsidianDeleteFile,
@@ -80,50 +79,22 @@ export const registerObsidianDeleteFileTool = async (
             });
           logger.debug(`Handling '${toolName}' request`, handlerContext);
 
-          // Wrap the core logic execution in a tryCatch block.
-          return await ErrorHandler.tryCatch(
-            async () => {
-              // Delegate the actual file deletion logic to the processing function.
-              // Note: Input schema and shape are identical, no separate refinement parse needed here.
-              const response: ObsidianDeleteFileResponse =
-                await processObsidianDeleteFile(
-                  params,
-                  handlerContext,
-                  vaultManager,
-                );
-              logger.debug(
-                `'${toolName}' processed successfully`,
+          // T1.2/T1.3/T1.4/T1.5 — runWriteTool wraps validation, retry,
+          // verification, idempotency caching, and structured error mapping.
+          return await runWriteTool({
+            toolName,
+            idempotencyKey: params.idempotency_key,
+            lockKey: buildWriteLockKey(params.vault, params.filePath),
+            context: handlerContext,
+            errorContext: { file: params.filePath },
+            handler: async () => {
+              return await processObsidianDeleteFile(
+                params,
                 handlerContext,
+                vaultManager,
               );
-
-              // Format the successful response object from the logic function into the required MCP CallToolResult structure.
-              // The response object (success, message) is serialized to JSON.
-              return {
-                content: [
-                  {
-                    type: "text", // Standard content type for structured JSON data
-                    text: JSON.stringify(response, null, 2), // Pretty-print JSON
-                  },
-                ],
-                isError: false, // Indicate successful execution
-              };
             },
-            {
-              // Configuration for the inner error handler (processing logic).
-              operation: `processing ${toolName} handler`,
-              context: handlerContext,
-              input: params, // Log the full input parameters if an error occurs.
-              // Custom error mapping for consistent error reporting.
-              errorMapper: (error: unknown) =>
-                new McpError(
-                  error instanceof McpError
-                    ? error.code
-                    : BaseErrorCode.INTERNAL_ERROR,
-                  `Error processing ${toolName} tool: ${error instanceof Error ? error.message : "Unknown error"}`,
-                  { ...handlerContext }, // Include context
-                ),
-            },
-          ); // End of inner ErrorHandler.tryCatch
+          });
         },
       ); // End of server.tool call
 

@@ -5,19 +5,20 @@
  */
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { ObsidianRestApiService } from "../../../services/obsidianRestAPI/index.js";
+import { VaultManager } from "../../../services/vaultManager/index.js";
 import { BaseErrorCode, McpError } from "../../../types-global/errors.js";
 import {
+  buildWriteLockKey,
   ErrorHandler,
   logger,
   RequestContext,
   requestContextService,
+  runWriteTool,
 } from "../../../utils/index.js";
 import {
   CreateTaskInputSchema,
   obsidianCreateTaskLogic,
   type CreateTaskInput,
-  type CreateTaskResponse,
 } from "./logic.js";
 
 /**
@@ -33,7 +34,7 @@ import {
  */
 export const registerObsidianCreateTaskTool = async (
   server: McpServer,
-  obsidianService: ObsidianRestApiService,
+  vaultManager: VaultManager,
 ): Promise<void> => {
   const toolName = "obsidian_create_task";
   const toolDescription = `Create tasks in Obsidian with full Tasks plugin metadata support and intelligent targeting.
@@ -122,39 +123,38 @@ This tool creates properly formatted tasks with comprehensive metadata support, 
 
           logger.debug(`Handling '${toolName}' request`, handlerContext);
 
-          // Wrap the core logic execution in a tryCatch block
-          return await ErrorHandler.tryCatch(
-            async () => {
-              // Execute the task creation logic
-              const response: CreateTaskResponse =
-                await obsidianCreateTaskLogic(
-                  params,
-                  handlerContext,
-                  obsidianService,
-                );
-
-              logger.debug(
-                `'${toolName}' processed successfully`,
+          // T1.2/T1.3/T1.4/T1.5 — runWriteTool wraps validation, retry,
+          // verification, idempotency caching, and structured error mapping.
+          return await runWriteTool({
+            toolName,
+            idempotencyKey: params.idempotency_key,
+            // Best-effort lock key based on caller-supplied target. The
+            // logic resolves the actual file path at runtime; we lock on
+            // the user-visible identifier they provided.
+            lockKey: buildWriteLockKey(
+              params.vault,
+              params.filePath
+                ? params.filePath
+                : params.useActiveFile
+                  ? "__active__"
+                  : params.usePeriodicNote
+                    ? `__periodic_${params.usePeriodicNote}__`
+                    : undefined,
+            ),
+            context: handlerContext,
+            errorContext: {
+              file: params.filePath,
+              useActiveFile: params.useActiveFile,
+              usePeriodicNote: params.usePeriodicNote,
+            },
+            handler: async () => {
+              return await obsidianCreateTaskLogic(
+                params,
                 handlerContext,
+                vaultManager,
               );
-
-              // Format the successful response object into the required MCP CallToolResult structure
-              return {
-                content: [
-                  {
-                    type: "text",
-                    text: JSON.stringify(response, null, 2),
-                  },
-                ],
-                isError: false,
-              };
             },
-            {
-              operation: `processing ${toolName} handler`,
-              context: handlerContext,
-              input: { ...params, text: params.text.substring(0, 50) },
-            },
-          );
+          });
         },
       );
 

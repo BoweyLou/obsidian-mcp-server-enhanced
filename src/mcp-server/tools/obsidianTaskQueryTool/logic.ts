@@ -667,18 +667,25 @@ async function executeTasksPluginQuery(
   context: RequestContext
 ): Promise<TaskItem[]> {
   try {
-    // Use Dataview to access Tasks plugin data with native query
+    // Use Dataview to access Tasks plugin data with native query.
+    // Notes:
+    //  - The Local REST API's /search/ endpoint rejects "TABLE WITHOUT ID";
+    //    use plain TABLE. Named columns are still addressable by name on
+    //    result.result.
+    //  - Avoid Tasks-plugin-specific fields like task.status.symbol and
+    //    task.priority.name which only exist when the Tasks plugin's Dataview
+    //    extension is active. With vanilla Dataview, task.status is a string
+    //    (the symbol char) and task.priority is undefined; priority and
+    //    recurrence are recovered below by regex over task.text.
     const dataviewQuery = `
-TABLE WITHOUT ID 
+TABLE
   task.text as Text,
-  task.status.symbol as Status,
-  task.priority.name as Priority,
+  task.status as Status,
   task.due as DueDate,
   task.scheduled as ScheduledDate,
   task.start as StartDate,
   task.done as CompletionDate,
   task.created as CreatedDate,
-  task.recurrence as Recurrence,
   task.tags as Tags,
   file.path as FilePath,
   task.line as LineNumber
@@ -706,7 +713,11 @@ LIMIT 500`;
     for (const searchResult of dataviewResults) {
       if (searchResult.result) {
         const result = searchResult.result;
-        
+
+        // Priority and recurrence are not available on vanilla Dataview's
+        // file.tasks; extract them (and any missing dates) from the raw text.
+        const textMeta = extractTaskMetadata(result.Text || "");
+
         const task: TaskItem = {
           text: result.Text || "",
           status: parseTaskStatusFromSymbol(result.Status || " "),
@@ -717,16 +728,15 @@ LIMIT 500`;
           hasSubtasks: false,
           tags: Array.isArray(result.Tags) ? result.Tags : [],
         };
-        
-        // Add optional properties if they exist
-        if (result.Priority) task.priority = result.Priority.toLowerCase();
+
+        if (textMeta.priority) task.priority = textMeta.priority;
         if (result.DueDate) task.dueDate = result.DueDate;
         if (result.ScheduledDate) task.scheduledDate = result.ScheduledDate;
         if (result.StartDate) task.startDate = result.StartDate;
         if (result.CompletionDate) task.completionDate = result.CompletionDate;
         if (result.CreatedDate) task.createdDate = result.CreatedDate;
-        if (result.Recurrence) task.recurrence = result.Recurrence;
-        
+        if (textMeta.recurrence) task.recurrence = textMeta.recurrence;
+
         tasks.push(task);
       }
     }
@@ -762,15 +772,16 @@ function convertTasksQueryToDataview(tasksQuery: string): string {
     } else if (line.includes("due tomorrow")) {
       whereConditions.push("AND task.due = date(today) + dur(1 day)");
     } else if (line.includes("priority is highest")) {
-      whereConditions.push("AND task.priority.name = \"Highest\"");
+      // task.priority is unavailable in vanilla Dataview; match by emoji in text.
+      whereConditions.push('AND regexmatch("🔺|⏫", task.text)');
     } else if (line.includes("priority is high")) {
-      whereConditions.push("AND task.priority.name = \"High\"");
+      whereConditions.push('AND regexmatch("🔴|‼️|❗|🚨|⬆️", task.text)');
     } else if (line.includes("priority is medium")) {
-      whereConditions.push("AND task.priority.name = \"Medium\"");
+      whereConditions.push('AND regexmatch("🟡|🟠|➡️", task.text)');
     } else if (line.includes("priority is low")) {
-      whereConditions.push("AND task.priority.name = \"Low\"");
+      whereConditions.push('AND regexmatch("🔵|🟢|⬇️|🔽", task.text)');
     } else if (line.includes("priority is lowest")) {
-      whereConditions.push("AND task.priority.name = \"Lowest\"");
+      whereConditions.push('AND regexmatch("🔻|⏬", task.text)');
     } else if (line.includes("path includes")) {
       const pathMatch = line.match(/path includes (.+)/);
       if (pathMatch) {
@@ -857,10 +868,11 @@ export async function obsidianTaskQueryLogic(
       // Fallback to enhanced manual search and parsing
       let searchResults = new Map<string, any>();
       
-      // Try Dataview query for file discovery
+      // Try Dataview query for file discovery. Use plain TABLE — the Local
+      // REST API rejects "TABLE WITHOUT ID".
       try {
         const dataviewQuery = `
-TABLE WITHOUT ID file.link as File, length(file.tasks) as Tasks
+TABLE file.link as File, length(file.tasks) as Tasks
 WHERE length(file.tasks) > 0
 SORT file.name ASC
 LIMIT 100`;

@@ -2,15 +2,21 @@ import { z } from "zod";
 import { dump } from "js-yaml";
 import {
   NoteJson,
-  ObsidianRestApiService,
   PatchOptions,
-  VaultCacheService,
 } from "../../../services/obsidianRestAPI/index.js";
+import { VaultManager } from "../../../services/vaultManager/index.js";
 import { BaseErrorCode, McpError } from "../../../types-global/errors.js";
 import {
+  assertContentHash,
+  expectedContentHashDescription,
   logger,
+  preflightContentHash,
   RequestContext,
   retryWithDelay,
+  retryWithExponentialBackoff,
+  verifyContentMatch,
+  verifyFileReadable,
+  VerificationResult,
 } from "../../../utils/index.js";
 
 // ====================================================================================
@@ -41,6 +47,22 @@ const ManageFrontmatterInputSchemaBase = z.object({
     .describe(
       "The value to assign when using the 'set' operation. Can be a string, number, boolean, array, or a JSON object.",
     ),
+  vault: z
+    .string()
+    .optional()
+    .describe(
+      'The ID of the vault to write to (e.g., "personal", "work"). If not specified, uses the default vault.',
+    ),
+  idempotency_key: z
+    .string()
+    .optional()
+    .describe(
+      "Optional client-supplied UUID. If the same key is sent twice within 60s, the second call returns the cached result.",
+    ),
+  expected_content_hash: z
+    .string()
+    .optional()
+    .describe(expectedContentHashDescription),
 });
 
 export const ObsidianManageFrontmatterInputSchemaShape =
@@ -68,6 +90,8 @@ export interface ObsidianManageFrontmatterResponse {
   success: boolean;
   message: string;
   value?: any;
+  /** T1.3 — read-back verification result. */
+  verification?: VerificationResult;
 }
 
 // ====================================================================================
@@ -77,17 +101,22 @@ export interface ObsidianManageFrontmatterResponse {
 export const processObsidianManageFrontmatter = async (
   params: ObsidianManageFrontmatterInput,
   context: RequestContext,
-  obsidianService: ObsidianRestApiService,
-  vaultCacheService: VaultCacheService | undefined,
+  vaultManager: VaultManager,
 ): Promise<ObsidianManageFrontmatterResponse> => {
+  const { filePath, operation, key, value, vault: vaultId } = params;
+
+  const obsidianService = vaultManager.getVaultService(vaultId, context);
+  const vaultCacheService = vaultManager.getVaultCacheService(vaultId, context);
+  const vaultConfig = vaultManager.getVaultConfig(vaultId);
+
   logger.debug(`Processing obsidian_manage_frontmatter request`, {
     ...context,
     operation: params.operation,
     filePath: params.filePath,
     key: params.key,
+    vaultId: vaultConfig.id,
+    vaultName: vaultConfig.name,
   });
-
-  const { filePath, operation, key, value } = params;
 
   const shouldRetryNotFound = (err: unknown) =>
     err instanceof McpError && err.code === BaseErrorCode.NOT_FOUND;
@@ -121,6 +150,13 @@ export const processObsidianManageFrontmatter = async (
     }
 
     case "set": {
+      // T2.3: pre-flight hash check (extra GET — patch path doesn't read).
+      await preflightContentHash(
+        { kind: "filePath", path: filePath },
+        params.expected_content_hash,
+        obsidianService,
+        { ...context, operation: "preflightContentHash" },
+      );
       const patchOptions: PatchOptions = {
         operation: "replace",
         targetType: "frontmatter",
@@ -132,25 +168,31 @@ export const processObsidianManageFrontmatter = async (
       const content =
         typeof value === "object" ? JSON.stringify(value) : String(value);
 
-      await retryWithDelay(
+      // T1.2: exponential-backoff retry on the patch.
+      await retryWithExponentialBackoff(
         () =>
           obsidianService.patchFile(filePath, content, patchOptions, context),
         {
-          operationName: `patchFileForFrontmatterSet`,
+          operationName: "obsidian_manage_frontmatter:set",
           context,
-          maxRetries: 3,
-          delayMs: 300,
-          shouldRetry: shouldRetryNotFound,
+          errorContext: { file: filePath, key },
         },
       );
 
       if (vaultCacheService) {
         await vaultCacheService.updateCacheForFile(filePath, context);
       }
+      // T1.3: light verification — confirm the file is still readable post-patch.
+      const setVerification = await verifyFileReadable(
+        { kind: "filePath", path: filePath },
+        obsidianService,
+        { ...context, operation: "verifyFileReadable" },
+      );
       return {
         success: true,
         message: `Successfully set key '${key}' in frontmatter.`,
         value: { [key]: value },
+        verification: setVerification,
       };
     }
 
@@ -178,6 +220,13 @@ export const processObsidianManageFrontmatter = async (
         context,
         "markdown",
       )) as string;
+      // T2.3: pre-flight hash check on the markdown form.
+      assertContentHash(
+        noteContent,
+        params.expected_content_hash,
+        filePath,
+        context,
+      );
 
       const frontmatterRegex = /^---\n([\s\S]*?)\n---\n/;
       const match = noteContent.match(frontmatterRegex);
@@ -210,14 +259,14 @@ export const processObsidianManageFrontmatter = async (
         };
       }
 
-      await retryWithDelay(
+      // T1.2: exponential-backoff retry; T1.3: strict hash verification —
+      // delete rewrites the whole note so we know the expected content.
+      await retryWithExponentialBackoff(
         () => obsidianService.updateFileContent(filePath, newContent, context),
         {
-          operationName: `updateFileForFrontmatterDelete`,
+          operationName: "obsidian_manage_frontmatter:delete",
           context,
-          maxRetries: 3,
-          delayMs: 300,
-          shouldRetry: shouldRetryNotFound,
+          errorContext: { file: filePath, key },
         },
       );
 
@@ -225,10 +274,25 @@ export const processObsidianManageFrontmatter = async (
         await vaultCacheService.updateCacheForFile(filePath, context);
       }
 
+      const deleteVerification = await verifyContentMatch(
+        { kind: "filePath", path: filePath },
+        newContent,
+        obsidianService,
+        { ...context, operation: "verifyContentMatch" },
+      );
+      if (!deleteVerification.verified) {
+        throw new McpError(
+          BaseErrorCode.INTERNAL_ERROR,
+          `Frontmatter delete reported success but read-back verification failed: ${deleteVerification.reason}`,
+          { ...context, verification_error: true, verification: deleteVerification },
+        );
+      }
+
       return {
         success: true,
         message: `Successfully deleted key '${key}' from frontmatter.`,
         value: {},
+        verification: deleteVerification,
       };
     }
 

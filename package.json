@@ -31,6 +31,7 @@
     "docs:generate": "typedoc --tsconfig ./tsconfig.typedoc.json",
     "tree": "ts-node --esm scripts/tree.ts",
     "format": "prettier --write \"**/*.{ts,js,json,md,html,css}\"",
+    "test": "vitest run",
     "inspect": "mcp-inspector --config mcp.json",
     "inspect:stdio": "mcp-inspector --config mcp.json --server obsidian-mcp-server-stdio",
     "inspect:http": "mcp-inspector --config mcp.json --server obsidian-mcp-server-http"
@@ -86,9 +87,10 @@
   "devDependencies": {
     "@types/express": "^5.0.3",
     "@types/js-yaml": "^4.0.9",
-    "@types/node": "^24.0.1",
+    "@types/node": "^24.12.2",
     "js-yaml": "^4.1.0",
     "prettier": "^3.5.3",
-    "typedoc": "^0.28.5"
+    "typedoc": "^0.28.5",
+    "vitest": "^4.1.5"
   }
 }

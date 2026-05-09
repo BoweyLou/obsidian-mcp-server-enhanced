@@ -2,14 +2,18 @@ import { z } from "zod";
 import { dump } from "js-yaml";
 import {
   NoteJson,
-  ObsidianRestApiService,
-  VaultCacheService,
 } from "../../../services/obsidianRestAPI/index.js";
+import { VaultManager } from "../../../services/vaultManager/index.js";
 import { BaseErrorCode, McpError } from "../../../types-global/errors.js";
 import {
+  assertContentHash,
+  expectedContentHashDescription,
   logger,
   RequestContext,
   retryWithDelay,
+  retryWithExponentialBackoff,
+  verifyContentMatch,
+  VerificationResult,
 } from "../../../utils/index.js";
 import { sanitization } from "../../../utils/security/sanitization.js";
 
@@ -34,6 +38,22 @@ const ManageTagsInputSchemaBase = z.object({
     .describe(
       "An array of tag names to be processed. The '#' prefix should be omitted (e.g., use 'project/active', not '#project/active').",
     ),
+  vault: z
+    .string()
+    .optional()
+    .describe(
+      'The ID of the vault to write to (e.g., "personal", "work"). If not specified, uses the default vault.',
+    ),
+  idempotency_key: z
+    .string()
+    .optional()
+    .describe(
+      "Optional client-supplied UUID. If the same key is sent twice within 60s, the second call returns the cached result.",
+    ),
+  expected_content_hash: z
+    .string()
+    .optional()
+    .describe(expectedContentHashDescription),
 });
 
 export const ObsidianManageTagsInputSchemaShape =
@@ -46,6 +66,8 @@ export interface ObsidianManageTagsResponse {
   success: boolean;
   message: string;
   currentTags: string[];
+  /** T1.3 — read-back verification result. */
+  verification?: VerificationResult;
 }
 
 // ====================================================================================
@@ -55,15 +77,21 @@ export interface ObsidianManageTagsResponse {
 export const processObsidianManageTags = async (
   params: ObsidianManageTagsInput,
   context: RequestContext,
-  obsidianService: ObsidianRestApiService,
-  vaultCacheService: VaultCacheService | undefined,
+  vaultManager: VaultManager,
 ): Promise<ObsidianManageTagsResponse> => {
+  const { filePath, operation, tags: inputTags, vault: vaultId } = params;
+
+  const obsidianService = vaultManager.getVaultService(vaultId, context);
+  const vaultCacheService = vaultManager.getVaultCacheService(vaultId, context);
+  const vaultConfig = vaultManager.getVaultConfig(vaultId);
+
   logger.debug(`Processing obsidian_manage_tags request`, {
     ...context,
     ...params,
+    vaultId: vaultConfig.id,
+    vaultName: vaultConfig.name,
   });
 
-  const { filePath, operation, tags: inputTags } = params;
   const sanitizedTags = inputTags.map((t) => sanitization.sanitizeTagName(t));
 
   const shouldRetryNotFound = (err: unknown) =>
@@ -121,6 +149,13 @@ export const processObsidianManageTags = async (
         context,
         "markdown",
       )) as string;
+      // T2.3: pre-flight hash check on the markdown form.
+      assertContentHash(
+        noteContent,
+        params.expected_content_hash,
+        filePath,
+        context,
+      );
       const frontmatterRegex = /^---\n([\s\S]*?)\n---\n/;
       const match = noteContent.match(frontmatterRegex);
       const newFrontmatterString = dump(frontmatter);
@@ -135,14 +170,13 @@ export const processObsidianManageTags = async (
         newContent = `---\n${newFrontmatterString}---\n\n${noteContent}`;
       }
 
-      await retryWithDelay(
+      // T1.2: exponential-backoff retry on the rewrite.
+      await retryWithExponentialBackoff(
         () => obsidianService.updateFileContent(filePath, newContent, context),
         {
-          operationName: `updateFileForTagAdd`,
+          operationName: "obsidian_manage_tags:add",
           context,
-          maxRetries: 3,
-          delayMs: 300,
-          shouldRetry: shouldRetryNotFound,
+          errorContext: { file: filePath, tagsToAdd },
         },
       );
 
@@ -150,11 +184,27 @@ export const processObsidianManageTags = async (
         await vaultCacheService.updateCacheForFile(filePath, context);
       }
 
+      // T1.3: hash-verify the post-write content.
+      const addVerification = await verifyContentMatch(
+        { kind: "filePath", path: filePath },
+        newContent,
+        obsidianService,
+        { ...context, operation: "verifyContentMatch" },
+      );
+      if (!addVerification.verified) {
+        throw new McpError(
+          BaseErrorCode.INTERNAL_ERROR,
+          `Tag add reported success but read-back verification failed: ${addVerification.reason}`,
+          { ...context, verification_error: true, verification: addVerification },
+        );
+      }
+
       const finalTags = [...new Set([...currentTags, ...tagsToAdd])];
       return {
         success: true,
         message: `Successfully added tags: ${tagsToAdd.join(", ")}.`,
         currentTags: finalTags,
+        verification: addVerification,
       };
     }
 
@@ -170,6 +220,13 @@ export const processObsidianManageTags = async (
       }
 
       let noteContent = (await getFileWithRetry(context, "markdown")) as string;
+      // T2.3: pre-flight hash check on the markdown form.
+      assertContentHash(
+        noteContent,
+        params.expected_content_hash,
+        filePath,
+        context,
+      );
       const frontmatter = initialNote.frontmatter ?? {};
       let frontmatterTags: string[] = Array.isArray(frontmatter.tags)
         ? frontmatter.tags
@@ -212,18 +269,36 @@ export const processObsidianManageTags = async (
         }
       }
 
+      let removeVerification: VerificationResult | undefined;
       if (frontmatterModified || inlineModified) {
-        await retryWithDelay(
+        // T1.2: exponential-backoff retry on the rewrite.
+        await retryWithExponentialBackoff(
           () =>
             obsidianService.updateFileContent(filePath, noteContent, context),
           {
-            operationName: `updateFileContentForTagRemove`,
+            operationName: "obsidian_manage_tags:remove",
             context,
-            maxRetries: 3,
-            delayMs: 300,
-            shouldRetry: shouldRetryNotFound,
+            errorContext: { file: filePath, tagsToRemove },
           },
         );
+        // T1.3: hash-verify.
+        removeVerification = await verifyContentMatch(
+          { kind: "filePath", path: filePath },
+          noteContent,
+          obsidianService,
+          { ...context, operation: "verifyContentMatch" },
+        );
+        if (!removeVerification.verified) {
+          throw new McpError(
+            BaseErrorCode.INTERNAL_ERROR,
+            `Tag remove reported success but read-back verification failed: ${removeVerification.reason}`,
+            {
+              ...context,
+              verification_error: true,
+              verification: removeVerification,
+            },
+          );
+        }
       }
 
       if (vaultCacheService) {
@@ -235,6 +310,7 @@ export const processObsidianManageTags = async (
         success: true,
         message: `Successfully removed tags: ${tagsToRemove.join(", ")}.`,
         currentTags: finalTags,
+        verification: removeVerification,
       };
     }
 

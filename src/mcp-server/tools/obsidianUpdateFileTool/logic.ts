@@ -2,14 +2,23 @@ import { z } from "zod";
 import {
   NoteJson,
   ObsidianRestApiService,
-  VaultCacheService,
 } from "../../../services/obsidianRestAPI/index.js";
+import { VaultManager } from "../../../services/vaultManager/index.js";
 import { BaseErrorCode, McpError } from "../../../types-global/errors.js";
 import {
   createFormattedStatWithTokenCount,
+  expectedContentHashDescription,
+  HashMismatchError,
   logger,
+  preflightContentHash,
   RequestContext,
   retryWithDelay,
+  retryWithExponentialBackoff,
+  verifyContentMatch,
+  VerificationResult,
+  VerificationTarget,
+  WriteLockTimeoutError,
+  WriteRetryExhaustedError,
 } from "../../../utils/index.js";
 
 // ====================================================================================
@@ -66,6 +75,15 @@ const BaseUpdateSchema = z.object({
     .describe(
       "Identifier for 'filePath' (vault-relative path) or 'periodicNote' (period string). Not used for 'activeFile'.",
     ),
+  /**
+   * The ID of the vault to write to. If not specified, uses the default vault.
+   */
+  vault: z
+    .string()
+    .optional()
+    .describe(
+      'The ID of the vault to write to (e.g., "personal", "work"). If not specified, uses the default vault.',
+    ),
 });
 
 /**
@@ -99,6 +117,11 @@ const WholeFileUpdateSchema = BaseUpdateSchema.extend({
     .optional()
     .default(false)
     .describe("If true, returns the final file content in the response."),
+  /** T2.3 — optional pre-flight hash check. Mirrors the registration schema so it survives refined parsing. */
+  expected_content_hash: z
+    .string()
+    .optional()
+    .describe(expectedContentHashDescription),
 });
 
 // ====================================================================================
@@ -158,6 +181,25 @@ const ObsidianUpdateFileRegistrationSchema = z
       .optional()
       .default(false)
       .describe("If true, returns the final file content in the response."),
+    /** The ID of the vault to write to. If not specified, uses the default vault. */
+    vault: z
+      .string()
+      .optional()
+      .describe(
+        'The ID of the vault to write to (e.g., "personal", "work"). If not specified, uses the default vault.',
+      ),
+    /** T1.4 — optional idempotency UUID. */
+    idempotency_key: z
+      .string()
+      .optional()
+      .describe(
+        "Optional client-supplied UUID. If the same key is sent twice within 60s, the second call is a no-op and returns the cached result. Closes delete+rewrite race conditions on retry.",
+      ),
+    /** T2.3 — optional pre-flight hash check. */
+    expected_content_hash: z
+      .string()
+      .optional()
+      .describe(expectedContentHashDescription),
   })
   .describe(
     "Tool to modify Obsidian notes (specified by file path, active file, or periodic note) using whole-file operations: 'append', 'prepend', or 'overwrite'. Options control creation and overwrite behavior.",
@@ -254,6 +296,8 @@ export interface ObsidianUpdateFileResponse {
   stats?: FormattedStat; // Renamed from stat
   /** Optional final content of the file, included only if `returnContent` was true in the request and the file could be read. */
   finalContent?: string;
+  /** T1.3 — read-back hash verification result. */
+  verification?: VerificationResult;
 }
 
 // ====================================================================================
@@ -339,13 +383,21 @@ async function getFinalState(
 export const processObsidianUpdateFile = async (
   params: ObsidianUpdateFileInput, // Use the refined, validated type
   context: RequestContext,
-  obsidianService: ObsidianRestApiService,
-  vaultCacheService: VaultCacheService | undefined,
+  vaultManager: VaultManager,
 ): Promise<ObsidianUpdateFileResponse> => {
+  const obsidianService = vaultManager.getVaultService(params.vault, context);
+  const vaultCacheService = vaultManager.getVaultCacheService(
+    params.vault,
+    context,
+  );
+  const vaultConfig = vaultManager.getVaultConfig(params.vault);
+
   logger.debug(`Processing obsidian_update_file request (wholeFile mode)`, {
     ...context,
     targetType: params.targetType,
     wholeFileMode: params.wholeFileMode,
+    vaultId: vaultConfig.id,
+    vaultName: vaultConfig.name,
   });
 
   const targetId = params.targetIdentifier; // Alias for clarity
@@ -353,6 +405,8 @@ export const processObsidianUpdateFile = async (
   const mode = params.wholeFileMode;
   let wasCreated = false; // Flag to track if the file was newly created by the operation
   let targetPeriod: z.infer<typeof PeriodicNotePeriodSchema> | undefined;
+  // T1.3 — capture what the file content should be after the write so we can hash-verify.
+  let expectedPostWriteContent: string | undefined;
 
   // Parse the period if the target is a periodic note
   if (params.targetType === "periodicNote" && targetId) {
@@ -497,6 +551,25 @@ export const processObsidianUpdateFile = async (
       safetyCheckContext,
     );
 
+    // --- T2.3: Pre-flight hash check (only when modifying existing content) ---
+    // If the file is being created fresh, there is no prior content to hash
+    // against, so the check is meaningfully a no-op even if the caller passed
+    // a hash.
+    if (existsBefore && params.expected_content_hash) {
+      const preflightTarget: VerificationTarget =
+        params.targetType === "filePath" && targetId
+          ? { kind: "filePath", path: targetId }
+          : params.targetType === "activeFile"
+            ? { kind: "activeFile" }
+            : { kind: "periodicNote", period: targetPeriod! };
+      await preflightContentHash(
+        preflightTarget,
+        params.expected_content_hash,
+        obsidianService,
+        { ...context, operation: "preflightContentHash" },
+      );
+    }
+
     // --- Step 3: Perform the Update Operation via Obsidian API ---
     const updateContext = {
       ...context,
@@ -568,23 +641,37 @@ export const processObsidianUpdateFile = async (
       );
 
       // Overwrite the target with the newly combined content.
+      // T1.2: wrap the API write in exponential-backoff retry (1s/2s/4s).
       const writeContext = { ...updateContext, subOperation: "writeCombined" };
       logger.debug(`Writing combined content back to target`, writeContext);
-      if (params.targetType === "filePath" && targetId) {
-        await obsidianService.updateFileContent(
-          targetId,
-          newContent,
-          writeContext,
-        );
-      } else if (params.targetType === "activeFile") {
-        await obsidianService.updateActiveFile(newContent, writeContext);
-      } else if (params.targetType === "periodicNote" && targetPeriod) {
-        await obsidianService.updatePeriodicNote(
-          targetPeriod,
-          newContent,
-          writeContext,
-        );
-      }
+      await retryWithExponentialBackoff(
+        async () => {
+          if (params.targetType === "filePath" && targetId) {
+            await obsidianService.updateFileContent(
+              targetId,
+              newContent,
+              writeContext,
+            );
+          } else if (params.targetType === "activeFile") {
+            await obsidianService.updateActiveFile(newContent, writeContext);
+          } else if (params.targetType === "periodicNote" && targetPeriod) {
+            await obsidianService.updatePeriodicNote(
+              targetPeriod,
+              newContent,
+              writeContext,
+            );
+          }
+        },
+        {
+          operationName: `obsidian_update_file:${mode}`,
+          context: writeContext,
+          errorContext: {
+            file: targetId ?? params.targetType,
+            mode,
+          },
+        },
+      );
+      expectedPostWriteContent = newContent;
       logger.debug(
         `Successfully wrote combined content for ${mode}`,
         writeContext,
@@ -593,28 +680,39 @@ export const processObsidianUpdateFile = async (
         await vaultCacheService.updateCacheForFile(targetId, writeContext);
       }
     } else {
-      // Handle 'overwrite' mode directly.
-      switch (params.targetType) {
-        case "filePath":
-          // targetId is guaranteed by refined schema check
-          await obsidianService.updateFileContent(
-            targetId!,
-            contentString,
-            updateContext,
-          );
-          break;
-        case "activeFile":
-          await obsidianService.updateActiveFile(contentString, updateContext);
-          break;
-        case "periodicNote":
-          // targetPeriod is guaranteed by refined schema check
-          await obsidianService.updatePeriodicNote(
-            targetPeriod!,
-            contentString,
-            updateContext,
-          );
-          break;
-      }
+      // Handle 'overwrite' mode directly. T1.2: wrap in exponential-backoff retry.
+      await retryWithExponentialBackoff(
+        async () => {
+          switch (params.targetType) {
+            case "filePath":
+              await obsidianService.updateFileContent(
+                targetId!,
+                contentString,
+                updateContext,
+              );
+              break;
+            case "activeFile":
+              await obsidianService.updateActiveFile(contentString, updateContext);
+              break;
+            case "periodicNote":
+              await obsidianService.updatePeriodicNote(
+                targetPeriod!,
+                contentString,
+                updateContext,
+              );
+              break;
+          }
+        },
+        {
+          operationName: `obsidian_update_file:overwrite`,
+          context: updateContext,
+          errorContext: {
+            file: targetId ?? params.targetType,
+            mode: "overwrite",
+          },
+        },
+      );
+      expectedPostWriteContent = contentString;
       logger.debug(
         `Successfully performed overwrite on target: ${params.targetType} ${targetId ?? "(active)"}`,
         updateContext,
@@ -690,6 +788,43 @@ export const processObsidianUpdateFile = async (
       // Do not re-throw here, allow the main process to construct a response with a warning.
     }
 
+    // --- Step 4b: T1.3 Read-back hash verification ---
+    let verification: VerificationResult | undefined;
+    if (expectedPostWriteContent !== undefined) {
+      const verifyTarget: VerificationTarget =
+        params.targetType === "filePath" && targetId
+          ? { kind: "filePath", path: targetId }
+          : params.targetType === "activeFile"
+            ? { kind: "activeFile" }
+            : { kind: "periodicNote", period: targetPeriod! };
+      verification = await verifyContentMatch(
+        verifyTarget,
+        expectedPostWriteContent,
+        obsidianService,
+        { ...context, operation: "verifyContentMatch" },
+      );
+      if (!verification.verified) {
+        logger.error(
+          `Write verification failed for ${params.targetType} ${targetId ?? "(active)"} (reason=${verification.reason})`,
+          undefined,
+          { ...context, operation: "verifyContentMatch", verification },
+        );
+        // Throw McpError so the wrapper turns this into a structured
+        // "verification_failed" response. No silent successes.
+        throw new McpError(
+          BaseErrorCode.INTERNAL_ERROR,
+          `Write reported success but read-back verification failed: ${verification.reason}`,
+          {
+            ...context,
+            verification_error: true,
+            expected_hash: verification.expected_hash,
+            actual_hash: verification.actual_hash,
+            reason: verification.reason,
+          },
+        );
+      }
+    }
+
     // --- Step 5: Construct Success Message ---
     // Create a user-friendly message indicating what happened.
     let messageAction: string;
@@ -740,6 +875,7 @@ export const processObsidianUpdateFile = async (
       success: true,
       message: successMessage,
       stats: formattedStat,
+      verification,
     };
 
     // Include final content if requested and available.
@@ -753,6 +889,15 @@ export const processObsidianUpdateFile = async (
 
     return response;
   } catch (error) {
+    // Preserve T2 structured error types so the wrapper can render them as
+    // hash_mismatch / lock_timeout / retry_exhausted instead of internal_error.
+    if (
+      error instanceof HashMismatchError ||
+      error instanceof WriteLockTimeoutError ||
+      error instanceof WriteRetryExhaustedError
+    ) {
+      throw error;
+    }
     // Handle errors, ensuring they are McpError instances before re-throwing.
     // Errors from obsidianService calls should already be McpErrors and logged by the service.
     if (error instanceof McpError) {

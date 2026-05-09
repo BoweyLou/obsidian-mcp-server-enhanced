@@ -5,7 +5,12 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import http from "http";
 import { config, environment } from "./config/index.js"; // This loads .env via dotenv.config()
 import { initializeAndStartServer } from "./mcp-server/server.js";
-import { requestContextService, retryWithDelay } from "./utils/index.js";
+import {
+  requestContextService,
+  retryWithDelay,
+  startKeepalive,
+  stopKeepalive,
+} from "./utils/index.js";
 import { logger, McpLogLevel } from "./utils/internal/logger.js"; // Import logger instance early
 // Import Services
 import { ObsidianRestApiService } from "./services/obsidianRestAPI/index.js";
@@ -57,6 +62,9 @@ const shutdown = async (signal: string) => {
   );
 
   try {
+    // T1.1: stop keepalive ping loop before tearing down vault services.
+    stopKeepalive();
+
     // Stop cache refresh timers for all vaults
     if (config.obsidianEnableCache && vaultManager) {
       // Stop periodic refresh for all vault cache services
@@ -261,6 +269,10 @@ const start = async () => {
 
     logger.info("VaultManager instantiated successfully.", startupContext);
     // --- End Service Instantiation ---
+
+    // T1.1: start the 30s keepalive against every configured vault to keep the
+    // axios connection pool warm. BUG-016 mitigation.
+    startKeepalive(vaultManager);
 
     // Initialize the server instance and start the selected transport
     logger.debug(

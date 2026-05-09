@@ -6,11 +6,20 @@
 
 import { z } from "zod";
 import { ObsidianRestApiService } from "../../../services/obsidianRestAPI/index.js";
+import { VaultManager } from "../../../services/vaultManager/index.js";
 import { BaseErrorCode, McpError } from "../../../types-global/errors.js";
 import {
+  assertContentHash,
   ErrorHandler,
+  expectedContentHashDescription,
+  HashMismatchError,
   logger,
   RequestContext,
+  retryWithExponentialBackoff,
+  verifyContentMatch,
+  VerificationResult,
+  WriteLockTimeoutError,
+  WriteRetryExhaustedError,
 } from "../../../utils/index.js";
 import * as chrono from "chrono-node";
 
@@ -58,6 +67,24 @@ export const UpdateTaskInputSchema = z.object({
   // Search options when no line number provided
   searchInSection: z.string().optional(),
   exactMatch: z.boolean().default(true),
+
+  // Vault selection (multi-vault support)
+  vault: z
+    .string()
+    .optional()
+    .describe(
+      'The ID of the vault to write to (e.g., "personal", "work"). If not specified, uses the default vault.',
+    ),
+  idempotency_key: z
+    .string()
+    .optional()
+    .describe(
+      "Optional client-supplied UUID. If the same key is sent twice within 60s, the second call returns the cached result.",
+    ),
+  expected_content_hash: z
+    .string()
+    .optional()
+    .describe(expectedContentHashDescription),
 });
 
 export type UpdateTaskInput = z.infer<typeof UpdateTaskInputSchema>;
@@ -84,6 +111,8 @@ export interface UpdateTaskResponse {
     recurrence?: { from?: string; to?: string };
   };
   executionTime: string;
+  /** T1.3 — read-back verification result. */
+  verification?: VerificationResult;
 }
 
 /**
@@ -399,10 +428,13 @@ function findTaskLine(
 export async function obsidianUpdateTaskLogic(
   input: UpdateTaskInput,
   context: RequestContext,
-  obsidianService: ObsidianRestApiService
+  vaultManager: VaultManager
 ): Promise<UpdateTaskResponse> {
   const startTime = Date.now();
-  
+
+  const obsidianService = vaultManager.getVaultService(input.vault, context);
+  const vaultConfig = vaultManager.getVaultConfig(input.vault);
+
   logger.info("Updating task with Obsidian Tasks plugin format", {
     ...context,
     operation: "updateTask",
@@ -412,13 +444,23 @@ export async function obsidianUpdateTaskLogic(
       lineNumber: input.lineNumber,
       taskText: input.taskText?.substring(0, 50),
     },
+    vaultId: vaultConfig.id,
+    vaultName: vaultConfig.name,
   });
 
   try {
     // Step 1: Get current file content
     const fileContent = await obsidianService.getFileContent(input.filePath, "markdown", context);
     const content = typeof fileContent === "string" ? fileContent : fileContent.content;
-    
+
+    // T2.3: pre-flight hash check on the markdown form.
+    assertContentHash(
+      content,
+      input.expected_content_hash,
+      input.filePath,
+      context,
+    );
+
     // Step 2: Find the task line
     const { lineNumber, taskLine } = findTaskLine(content, input);
     const parsed = parseTaskLine(taskLine);
@@ -482,8 +524,40 @@ export async function obsidianUpdateTaskLogic(
     lines[lineNumber - 1] = newTaskLine;
     const updatedContent = lines.join('\n');
     
-    await obsidianService.updateFileContent(input.filePath, updatedContent, context);
-    
+    // T1.2 retry on the rewrite.
+    await retryWithExponentialBackoff(
+      () =>
+        obsidianService.updateFileContent(
+          input.filePath,
+          updatedContent,
+          context,
+        ),
+      {
+        operationName: "obsidian_update_task:write",
+        context,
+        errorContext: {
+          file: input.filePath,
+          lineNumber,
+          op: input.operation,
+        },
+      },
+    );
+
+    // T1.3: hash-verify post-write content matches what we sent.
+    const verification = await verifyContentMatch(
+      { kind: "filePath", path: input.filePath },
+      updatedContent,
+      obsidianService,
+      { ...context, operation: "verifyContentMatch" },
+    );
+    if (!verification.verified) {
+      throw new McpError(
+        BaseErrorCode.INTERNAL_ERROR,
+        `Task update reported success but read-back verification failed: ${verification.reason}`,
+        { ...context, verification_error: true, verification },
+      );
+    }
+
     const executionTime = `${Date.now() - startTime}ms`;
     
     logger.info("Task updated successfully", {
@@ -502,16 +576,27 @@ export async function obsidianUpdateTaskLogic(
       updatedTask: newTaskLine,
       changes,
       executionTime,
+      verification,
     };
 
   } catch (error) {
     const executionTime = `${Date.now() - startTime}ms`;
-    
+
     logger.error("Task update failed", {
       ...context,
       error: error instanceof Error ? error.message : String(error),
       executionTime,
     });
+
+    // Preserve T2 structured error types so the wrapper can render them as
+    // hash_mismatch / lock_timeout / retry_exhausted instead of internal_error.
+    if (
+      error instanceof HashMismatchError ||
+      error instanceof WriteLockTimeoutError ||
+      error instanceof WriteRetryExhaustedError
+    ) {
+      throw error;
+    }
 
     if (error instanceof McpError) {
       throw error;

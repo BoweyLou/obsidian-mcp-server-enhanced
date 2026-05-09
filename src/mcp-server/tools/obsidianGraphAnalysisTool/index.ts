@@ -6,7 +6,7 @@ import { z } from "zod";
 
 import { RequestContext, requestContextService } from "../../../utils/index.js";
 import { BaseErrorCode, McpError } from "../../../types-global/errors.js";
-import { ObsidianRestApiService } from "../../../services/obsidianRestAPI/index.js";
+import { VaultManager } from "../../../services/vaultManager/index.js";
 
 import { obsidianGraphAnalysisToolDefinition } from "./registration.js";
 import { executeGraphAnalysisOperation, GraphAnalysisOperation } from "./logic.js";
@@ -16,11 +16,11 @@ import { executeGraphAnalysisOperation, GraphAnalysisOperation } from "./logic.j
  */
 const GraphAnalysisArgsSchema = z.object({
   operation: z.enum([
-    "get_note_links", 
-    "get_backlinks", 
-    "find_orphaned_notes", 
-    "find_hub_notes", 
-    "trace_connection_path", 
+    "get_note_links",
+    "get_backlinks",
+    "find_orphaned_notes",
+    "find_hub_notes",
+    "trace_connection_path",
     "analyze_tag_relationships",
     "get_vault_stats"
   ]),
@@ -30,6 +30,12 @@ const GraphAnalysisArgsSchema = z.object({
   includeTagLinks: z.boolean().default(true),
   includeFolderStructure: z.boolean().default(false),
   maxDepth: z.number().min(1).max(10).default(3),
+  vault: z
+    .string()
+    .optional()
+    .describe(
+      'The ID of the vault to analyze (e.g., "personal", "work"). If not specified, uses the default vault.',
+    ),
 });
 
 /**
@@ -37,7 +43,7 @@ const GraphAnalysisArgsSchema = z.object({
  */
 export async function registerObsidianGraphAnalysisTool(
   server: any,
-  obsidianService: ObsidianRestApiService,
+  vaultManager: VaultManager,
 ): Promise<void> {
   const toolName = "obsidian_graph_analysis";
   const toolDescription = obsidianGraphAnalysisToolDefinition.description;
@@ -50,7 +56,8 @@ export async function registerObsidianGraphAnalysisTool(
       const context = requestContextService.createRequestContext({
         operation: toolName,
       });
-      
+      const obsidianService = vaultManager.getVaultService(params.vault, context);
+
       const operation: GraphAnalysisOperation = {
         operation: params.operation,
         filePath: params.filePath,

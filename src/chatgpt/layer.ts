@@ -326,13 +326,13 @@ async function executeAction(
 
   switch (request.action) {
     case "searchNotes": {
-      const cacheService =
-        options.vaultManager.getVaultCacheService(vaultId, actionContext);
       const payload = await processObsidianGlobalSearch(
-        request.parameters,
+        {
+          ...request.parameters,
+          vault: vaultId,
+        },
         actionContext,
-        obsidianService,
-        cacheService,
+        options.vaultManager,
       );
       return { vaultId, payload };
     }
@@ -369,17 +369,23 @@ async function executeAction(
     }
     case "taskCreate": {
       const payload = await obsidianCreateTaskLogic(
-        request.parameters,
+        {
+          ...request.parameters,
+          vault: vaultId,
+        },
         actionContext,
-        obsidianService,
+        options.vaultManager,
       );
       return { vaultId, payload };
     }
     case "taskUpdate": {
       const payload = await obsidianUpdateTaskLogic(
-        request.parameters,
+        {
+          ...request.parameters,
+          vault: vaultId,
+        },
         actionContext,
-        obsidianService,
+        options.vaultManager,
       );
       return { vaultId, payload };
     }
