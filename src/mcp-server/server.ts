@@ -27,6 +27,7 @@ import { VaultCacheService } from "../services/obsidianRestAPI/vaultCache/index.
 // Import the Vault Manager service
 import { VaultManager } from "../services/vaultManager/index.js";
 // Import registration functions for specific resources and tools.
+import { registerObsidianBatchEditTool } from "./tools/obsidianBatchEditTool/index.js";
 import { registerObsidianDeleteFileTool } from "./tools/obsidianDeleteFileTool/index.js";
 import { registerObsidianGlobalSearchTool } from "./tools/obsidianGlobalSearchTool/index.js";
 import { registerObsidianListFilesTool } from "./tools/obsidianListFilesTool/index.js";
@@ -122,6 +123,7 @@ async function createMcpServerInstance(
     await registerObsidianDeleteFileTool(server, vaultManager);
     await registerObsidianTaskQueryTool(server, vaultManager);
     await registerObsidianTasksQueryBuilderTool(server, vaultManager);
+    await registerObsidianBatchEditTool(server, vaultManager);
     
     // Register tools using compatibility bridge (legacy signatures)
     if (config.obsidianEnableCache && defaultVaultCacheService) {
