@@ -1,11 +1,13 @@
 import { z } from "zod";
 import {
   NoteJson,
+  NoteStat,
   ObsidianRestApiService,
   VaultCacheService,
 } from "../../../services/obsidianRestAPI/index.js";
 import { BaseErrorCode, McpError } from "../../../types-global/errors.js";
 import {
+  countTokens,
   createFormattedStatWithTokenCount,
   logger,
   RequestContext,
@@ -41,6 +43,23 @@ const WholeFileModeSchema = z
 const PeriodicNotePeriodSchema = z
   .enum(["daily", "weekly", "monthly", "quarterly", "yearly"])
   .describe("Valid periods for 'periodicNote' target type.");
+
+/**
+ * Defines the depth of post-write verification performed after a modification.
+ * - 'none': No post-write read-back at all (fastest, no stats).
+ * - 'metadata': A lightweight metadata (HEAD) check is used to confirm the write and
+ *   report stats, avoiding a full content re-fetch. Only applies to 'filePath' targets
+ *   where the final content is already known in memory; otherwise behaves like 'full'.
+ * - 'full': The entire file is re-fetched from the server to confirm the write and
+ *   report stats/content (slowest, but most thorough).
+ */
+const VerifyModeSchema = z
+  .enum(["none", "metadata", "full"])
+  .optional()
+  .default("metadata")
+  .describe(
+    "Post-write verification depth. 'none' skips verification entirely (fastest). 'metadata' (default) confirms the write via a lightweight metadata check and reports stats. 'full' re-reads the entire file content from the server. Falls back to 'full' behavior when the final content isn't already known in memory or for 'activeFile'/'periodicNote' targets.",
+  );
 
 /**
  * Base Zod schema containing fields common to all update operations within this tool.
@@ -99,6 +118,8 @@ const WholeFileUpdateSchema = BaseUpdateSchema.extend({
     .optional()
     .default(false)
     .describe("If true, returns the final file content in the response."),
+  /** Controls the depth of post-write verification. Defaults to 'metadata'. */
+  verify: VerifyModeSchema,
 });
 
 // ====================================================================================
@@ -158,9 +179,11 @@ const ObsidianUpdateFileRegistrationSchema = z
       .optional()
       .default(false)
       .describe("If true, returns the final file content in the response."),
+    /** Controls the depth of post-write verification. Defaults to 'metadata'. */
+    verify: VerifyModeSchema,
   })
   .describe(
-    "Tool to modify Obsidian notes (specified by file path, active file, or periodic note) using whole-file operations: 'append', 'prepend', or 'overwrite'. Options control creation and overwrite behavior.",
+    "Tool to modify Obsidian notes (specified by file path, active file, or periodic note) using whole-file operations: 'append', 'prepend', or 'overwrite'. Options control creation and overwrite behavior, and 'verify' controls post-write verification depth.",
   );
 
 /**
@@ -233,10 +256,15 @@ export type ObsidianUpdateFileInput = z.infer<
  * human-readable timestamps and an estimated token count.
  */
 type FormattedStat = {
-  /** Creation time formatted as a standard date-time string. */
-  createdTime: string;
-  /** Last modified time formatted as a standard date-time string. */
-  modifiedTime: string;
+  /**
+   * Creation time formatted as a standard date-time string.
+   * Omitted when the REST API does not expose timestamps for the verification
+   * method used (e.g. HEAD-based 'metadata' verification on plugin versions
+   * that do not send x-obsidian-ctime/mtime headers).
+   */
+  createdTime?: string;
+  /** Last modified time formatted as a standard date-time string. Omitted when unavailable (see createdTime). */
+  modifiedTime?: string;
   /** Estimated token count of the file content (using tiktoken 'gpt-4o'). */
   tokenCountEstimate: number;
 };
@@ -321,6 +349,70 @@ async function getFinalState(
   }
 }
 
+/**
+ * Attempts to retrieve just the lightweight metadata (stat) of a 'filePath' target after an
+ * update, using a HEAD request instead of a full content re-fetch. This backs the 'metadata'
+ * verification mode, which is much cheaper than 'full' when the final content is already
+ * known in memory.
+ *
+ * The underlying `getFileMetadata` service call never throws (it swallows errors and resolves
+ * to `null`), so this wrapper re-throws a retryable error on a `null` result to allow
+ * `retryWithDelay` to apply the same backoff/retry semantics used elsewhere in this tool.
+ *
+ * @param {string} filePath - The vault-relative path of the file to check.
+ * @param {ObsidianRestApiService} obsidianService - The Obsidian API service instance.
+ * @param {RequestContext} context - The request context for logging and correlation.
+ * @returns {Promise<NoteStat | null>} A promise resolving to the file's metadata, or `null` if
+ *   it could not be retrieved after retries.
+ */
+async function getFinalMetadata(
+  filePath: string,
+  obsidianService: ObsidianRestApiService,
+  context: RequestContext,
+): Promise<NoteStat | null> {
+  const operation = "getFinalMetadata";
+  try {
+    return await retryWithDelay(
+      async () => {
+        const stat = await obsidianService.getFileMetadata(filePath, context);
+        if (stat === null) {
+          // Force a retryable failure so retryWithDelay's backoff kicks in.
+          throw new McpError(
+            BaseErrorCode.NOT_FOUND,
+            `Metadata not yet available for '${filePath}' after update.`,
+            { ...context, operation },
+          );
+        }
+        return stat;
+      },
+      {
+        operationName: "getFileMetadataAfterUpdate",
+        context: { ...context, operation: "getFileMetadataAfterUpdateAttempt" },
+        maxRetries: 3, // Total attempts: 1 initial + 2 retries
+        delayMs: 250,
+        shouldRetry: (error: unknown) =>
+          error instanceof McpError && error.code === BaseErrorCode.NOT_FOUND,
+        onRetry: (attempt, error) => {
+          const errorMsg =
+            error instanceof Error ? error.message : String(error);
+          logger.warning(
+            `getFinalMetadata (attempt ${attempt}) failed for '${filePath}'. Error: ${errorMsg}. Retrying...`,
+            { ...context, operation: "getFinalMetadataRetry" },
+          );
+        },
+      },
+    );
+  } catch (error) {
+    // All retries exhausted (or an unexpected error occurred); do not fail the main operation.
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    logger.warning(
+      `Could not retrieve final metadata after update for '${filePath}'. Error: ${errorMsg}`,
+      { ...context, operation, error: errorMsg },
+    );
+    return null;
+  }
+}
+
 // ====================================================================================
 // Core Logic Function
 // ====================================================================================
@@ -353,6 +445,11 @@ export const processObsidianUpdateFile = async (
   const mode = params.wholeFileMode;
   let wasCreated = false; // Flag to track if the file was newly created by the operation
   let targetPeriod: z.infer<typeof PeriodicNotePeriodSchema> | undefined;
+  // Tracks the exact content written to the target and whether it is fully known in memory
+  // (as opposed to needing a re-fetch to determine). This drives the 'metadata' verify mode
+  // and the cheap, fetch-free cache update path.
+  let writtenContent = "";
+  let finalContentKnown = false;
 
   // Parse the period if the target is a periodic note
   if (params.targetType === "periodicNote" && targetId) {
@@ -566,6 +663,9 @@ export const processObsidianUpdateFile = async (
         `Combined content length for ${mode}: ${newContent.length}`,
         updateContext,
       );
+      // The final content is fully composed in memory before writing, so it's always known.
+      writtenContent = newContent;
+      finalContentKnown = true;
 
       // Overwrite the target with the newly combined content.
       const writeContext = { ...updateContext, subOperation: "writeCombined" };
@@ -589,11 +689,11 @@ export const processObsidianUpdateFile = async (
         `Successfully wrote combined content for ${mode}`,
         writeContext,
       );
-      if (params.targetType === "filePath" && targetId && vaultCacheService) {
-        await vaultCacheService.updateCacheForFile(targetId, writeContext);
-      }
     } else {
       // Handle 'overwrite' mode directly.
+      // The final content is exactly the input content, so it's always known.
+      writtenContent = contentString;
+      finalContentKnown = true;
       switch (params.targetType) {
         case "filePath":
           // targetId is guaranteed by refined schema check
@@ -619,75 +719,193 @@ export const processObsidianUpdateFile = async (
         `Successfully performed overwrite on target: ${params.targetType} ${targetId ?? "(active)"}`,
         updateContext,
       );
-      if (params.targetType === "filePath" && targetId && vaultCacheService) {
-        await vaultCacheService.updateCacheForFile(targetId, updateContext);
-      }
     }
 
-    // --- Step 4: Get Final State (Stat and Optional Content) ---
-    // Add a small delay before attempting to get the final state, to allow Obsidian API to stabilize after write.
-    const POST_UPDATE_DELAY_MS = 250;
+    // --- Step 4: Post-Write Verification (Stat and Optional Content) ---
+    // Determine the effective verification mode for this call. 'metadata' only applies to
+    // 'filePath' targets where the final content is already known in memory; otherwise it
+    // falls back to 'full'. 'none' and 'full' are always honored as requested.
+    const requestedVerify = params.verify;
+    const effectiveVerify: "none" | "metadata" | "full" =
+      requestedVerify !== "metadata"
+        ? requestedVerify
+        : params.targetType === "filePath" && finalContentKnown
+          ? "metadata"
+          : "full";
     logger.debug(
-      `Waiting ${POST_UPDATE_DELAY_MS}ms before retrieving final state...`,
-      { ...context, operation: "postUpdateDelay" },
+      `Resolved verification mode: requested='${requestedVerify}', effective='${effectiveVerify}'`,
+      { ...context, operation: "resolveVerifyMode" },
     );
-    await new Promise((resolve) => setTimeout(resolve, POST_UPDATE_DELAY_MS));
 
-    // Attempt to retrieve the file's state *after* the modification.
-    let finalState: NoteJson | null = null; // Initialize to null
-    try {
-      finalState = await retryWithDelay(
-        async () =>
-          getFinalState(
+    // Outputs populated by whichever verification path runs below.
+    let finalState: NoteJson | null = null; // Only populated in 'full' mode
+    let stats: FormattedStat | undefined;
+    let finalContentForResponse: string | undefined;
+    let verificationNote: string | undefined; // Appended to the success message, if any
+    let cacheMtime: number | undefined; // Known only when verification yields a fresh mtime
+    let cacheContent: string = writtenContent; // Best-known content to seed the cache with
+
+    if (effectiveVerify === "none") {
+      // Fastest path: no post-write read-back whatsoever.
+      logger.debug(
+        `Skipping post-write verification (verify=none) for target: ${params.targetType} ${targetId ?? "(active)"}`,
+        { ...context, operation: "verifyNone" },
+      );
+      verificationNote = " (Verification skipped as requested.)";
+      if (params.returnContent) {
+        if (finalContentKnown) {
+          finalContentForResponse = writtenContent;
+        } else {
+          // Only fetch when the content truly isn't known in memory.
+          const fetched = await getFinalState(
             params.targetType,
             targetId,
             targetPeriod,
             obsidianService,
             context,
-          ),
-        {
-          operationName: "getFinalStateAfterUpdate",
-          context: { ...context, operation: "getFinalStateAfterUpdateAttempt" }, // Use a distinct context for retry logs
-          maxRetries: 3, // Total attempts: 1 initial + 2 retries
-          delayMs: 250, // Shorter delay
-          shouldRetry: (error: unknown) => {
-            // Retry on common transient issues or if the file might not be immediately available
-            const should =
-              error instanceof McpError &&
-              (error.code === BaseErrorCode.NOT_FOUND || // File might not be indexed immediately
-                error.code === BaseErrorCode.SERVICE_UNAVAILABLE || // API temporarily busy
-                error.code === BaseErrorCode.TIMEOUT); // API call timed out
-            if (should) {
-              logger.debug(
-                `getFinalStateAfterUpdate: shouldRetry=true for error code ${(error as McpError).code}`,
-                context,
+          );
+          finalContentForResponse = fetched?.content;
+        }
+      }
+    } else if (effectiveVerify === "metadata") {
+      // Cheap path: confirm the write via a HEAD request instead of a full content re-fetch.
+      const stat = await getFinalMetadata(targetId!, obsidianService, context);
+      if (stat && stat.mtime > 0) {
+        const formattedStatResult = await createFormattedStatWithTokenCount(
+          stat,
+          writtenContent,
+          context,
+        );
+        stats = formattedStatResult === null ? undefined : formattedStatResult;
+        cacheMtime = stat.mtime;
+        cacheContent = writtenContent;
+      } else if (stat) {
+        // HEAD succeeded (write verified) but the plugin did not send
+        // x-obsidian-mtime/ctime headers, so real timestamps are unavailable.
+        // Report what we truly know (token estimate from in-memory content)
+        // rather than fabricating epoch-zero timestamps. Leave cacheMtime
+        // unset so the cache falls back to the background full refresh,
+        // which obtains the real mtime.
+        try {
+          stats = {
+            tokenCountEstimate: await countTokens(writtenContent, context),
+          };
+        } catch (tokenError) {
+          logger.warning(
+            `Could not estimate token count for verified write: ${tokenError instanceof Error ? tokenError.message : String(tokenError)}`,
+            context,
+          );
+        }
+      } else {
+        verificationNote =
+          " (Warning: Could not retrieve final file stats/content after update.)";
+      }
+      if (params.returnContent) {
+        // Content is already known in memory regardless of whether the metadata check succeeded.
+        finalContentForResponse = writtenContent;
+      }
+    } else {
+      // 'full' mode (either requested directly, or as a fallback): re-fetch the entire file.
+      try {
+        finalState = await retryWithDelay(
+          async () =>
+            getFinalState(
+              params.targetType,
+              targetId,
+              targetPeriod,
+              obsidianService,
+              context,
+            ),
+          {
+            operationName: "getFinalStateAfterUpdate",
+            context: {
+              ...context,
+              operation: "getFinalStateAfterUpdateAttempt",
+            }, // Use a distinct context for retry logs
+            maxRetries: 3, // Total attempts: 1 initial + 2 retries
+            delayMs: 250, // Shorter delay
+            shouldRetry: (error: unknown) => {
+              // Retry on common transient issues or if the file might not be immediately available
+              const should =
+                error instanceof McpError &&
+                (error.code === BaseErrorCode.NOT_FOUND || // File might not be indexed immediately
+                  error.code === BaseErrorCode.SERVICE_UNAVAILABLE || // API temporarily busy
+                  error.code === BaseErrorCode.TIMEOUT); // API call timed out
+              if (should) {
+                logger.debug(
+                  `getFinalStateAfterUpdate: shouldRetry=true for error code ${(error as McpError).code}`,
+                  context,
+                );
+              }
+              return should;
+            },
+            onRetry: (attempt, error) => {
+              const errorMsg =
+                error instanceof Error ? error.message : String(error);
+              logger.warning(
+                `getFinalState (attempt ${attempt}) failed. Error: ${errorMsg}. Retrying...`,
+                { ...context, operation: "getFinalStateRetry" },
               );
-            }
-            return should;
+            },
           },
-          onRetry: (attempt, error) => {
-            const errorMsg =
-              error instanceof Error ? error.message : String(error);
-            logger.warning(
-              `getFinalState (attempt ${attempt}) failed. Error: ${errorMsg}. Retrying...`,
-              { ...context, operation: "getFinalStateRetry" },
-            );
-          },
-        },
-      );
-    } catch (error) {
-      // If retryWithDelay throws after all attempts, getFinalState effectively failed.
-      // The original getFinalState already logs a warning and returns null if it encounters an error internally
-      // and is designed not to let its failure stop the main operation.
-      // So, if retryWithDelay throws, it means even retries didn't help.
-      finalState = null; // Ensure finalState remains null
-      const errorMsg = error instanceof Error ? error.message : String(error);
-      logger.error(
-        `Failed to retrieve final state for target '${params.targetType} ${targetId ?? ""}' even after retries. Error: ${errorMsg}`,
-        error instanceof Error ? error : undefined,
-        context,
-      );
-      // Do not re-throw here, allow the main process to construct a response with a warning.
+        );
+      } catch (error) {
+        // If retryWithDelay throws after all attempts, getFinalState effectively failed.
+        // The original getFinalState already logs a warning and returns null if it encounters an error internally
+        // and is designed not to let its failure stop the main operation.
+        // So, if retryWithDelay throws, it means even retries didn't help.
+        finalState = null; // Ensure finalState remains null
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        logger.error(
+          `Failed to retrieve final state for target '${params.targetType} ${targetId ?? ""}' even after retries. Error: ${errorMsg}`,
+          error instanceof Error ? error : undefined,
+          context,
+        );
+        // Do not re-throw here, allow the main process to construct a response with a warning.
+      }
+
+      if (finalState === null) {
+        verificationNote =
+          " (Warning: Could not retrieve final file stats/content after update.)";
+      } else {
+        const finalContentForStat = finalState.content ?? "";
+        const formattedStatResult = finalState.stat
+          ? await createFormattedStatWithTokenCount(
+              finalState.stat,
+              finalContentForStat,
+              context,
+            )
+          : undefined;
+        stats = formattedStatResult === null ? undefined : formattedStatResult;
+        cacheMtime = finalState.stat?.mtime;
+        cacheContent = finalState.content ?? writtenContent;
+      }
+      if (params.returnContent) {
+        finalContentForResponse = finalState?.content;
+      }
+    }
+
+    // --- Step 4b: Cache Update (filePath targets only) ---
+    // Prefer a synchronous, fetch-free cache set when we have both the exact final content and
+    // a fresh mtime from verification. Otherwise, fall back to a fire-and-forget refresh so the
+    // response is never delayed waiting on cache consistency.
+    if (params.targetType === "filePath" && targetId && vaultCacheService) {
+      if (finalContentKnown && cacheMtime !== undefined) {
+        vaultCacheService.setCacheEntry(
+          targetId,
+          cacheContent,
+          cacheMtime,
+          context,
+        );
+      } else {
+        vaultCacheService.updateCacheForFile(targetId, context).catch((err) => {
+          const errorMsg = err instanceof Error ? err.message : String(err);
+          logger.warning(
+            `Fire-and-forget cache update failed for '${targetId}': ${errorMsg}`,
+            { ...context, operation: "fireAndForgetCacheUpdate" },
+          );
+        });
+      }
     }
 
     // --- Step 5: Construct Success Message ---
@@ -710,41 +928,34 @@ export const processObsidianUpdateFile = async (
     let successMessage = `File content successfully ${messageAction} for ${targetName}.`; // Use let
     logger.info(successMessage, context); // Log initial success message
 
-    // Append a warning if the final state couldn't be retrieved
-    if (finalState === null) {
-      const warningMsg =
-        " (Warning: Could not retrieve final file stats/content after update.)";
-      successMessage += warningMsg;
-      logger.warning(
-        `Appending warning to response message: ${warningMsg}`,
-        context,
-      );
+    // Append a verification note, if any (either a skip notice or a failure warning).
+    if (verificationNote) {
+      successMessage += verificationNote;
+      const isWarning = verificationNote.startsWith(" (Warning");
+      if (isWarning) {
+        logger.warning(
+          `Appending warning to response message: ${verificationNote}`,
+          context,
+        );
+      } else {
+        logger.debug(
+          `Appending note to response message: ${verificationNote}`,
+          context,
+        );
+      }
     }
 
     // --- Step 6: Build and Return Response ---
-    // Format the file statistics (if available) using the shared utility.
-    const finalContentForStat = finalState?.content ?? ""; // Provide content for token counting
-    const formattedStatResult = finalState?.stat
-      ? await createFormattedStatWithTokenCount(
-          finalState.stat,
-          finalContentForStat,
-          context,
-        ) // Await the async utility
-      : undefined;
-    // Ensure stat is undefined if the utility returned null (e.g., token counting failed)
-    const formattedStat =
-      formattedStatResult === null ? undefined : formattedStatResult;
-
-    // Construct the final response object.
+    // Construct the final response object using the stats gathered by the verification step above.
     const response: ObsidianUpdateFileResponse = {
       success: true,
       message: successMessage,
-      stats: formattedStat,
+      stats,
     };
 
     // Include final content if requested and available.
     if (params.returnContent) {
-      response.finalContent = finalState?.content; // Assign content if available, otherwise undefined
+      response.finalContent = finalContentForResponse; // Assign content if available, otherwise undefined
       logger.debug(
         `Including final content in response as requested.`,
         context,

@@ -135,6 +135,31 @@ export class VaultCacheService {
   }
 
   /**
+   * Directly sets a cache entry from content already held in memory.
+   * Use this after a write when the final content and mtime are already known
+   * (e.g. from an in-memory edit plus a metadata verification), avoiding the
+   * full file re-fetch that `updateCacheForFile` performs.
+   * @param {string} filePath - The vault-relative path of the file.
+   * @param {string} content - The file's final content.
+   * @param {number} mtime - The file's modification time (epoch ms).
+   * @param {RequestContext} context - The request context for logging.
+   */
+  public setCacheEntry(
+    filePath: string,
+    content: string,
+    mtime: number,
+    context: RequestContext,
+  ): void {
+    this.vaultContentCache.set(filePath, { content, mtime });
+    logger.debug(`Directly set cache entry for: ${filePath}`, {
+      ...context,
+      operation: "setCacheEntry",
+      filePath,
+      vaultId: this.vaultId,
+    });
+  }
+
+  /**
    * Immediately fetches the latest data for a single file and updates its entry in the cache.
    * This is useful for ensuring cache consistency immediately after a file modification.
    * @param {string} filePath - The vault-relative path of the file to update.

@@ -47,7 +47,7 @@ export const registerObsidianSearchReplaceTool = async (
 ): Promise<void> => {
   const toolName = "obsidian_search_replace";
   const toolDescription =
-    "Performs one or more search-and-replace operations within a target Obsidian note (file path, active, or periodic). Reads the file, applies replacements sequentially in memory, and writes the modified content back, overwriting the original. Supports string/regex search, case sensitivity toggle, replacing first/all occurrences, flexible whitespace matching (non-regex), and whole word matching. Returns success status, message, replacement count, a formatted timestamp string, file stats (stats), and optionally the final file content.";
+    "Performs one or more search-and-replace operations within a target Obsidian note (file path, active, or periodic). Reads the file, applies replacements sequentially in memory, and writes the modified content back, overwriting the original. Supports string/regex search, case sensitivity toggle, replacing first/all occurrences, flexible whitespace matching (non-regex), and whole word matching. The optional 'verify' parameter controls post-write verification depth: 'none' (fastest, no stats), 'metadata' (default, lightweight HEAD-based check), or 'full' (re-reads the entire file). Returns success status, message, replacement count, a formatted timestamp string, file stats (stats), and optionally the final file content.";
 
   // Create a context specifically for the registration process.
   const registrationContext: RequestContext =
@@ -94,6 +94,7 @@ export const registerObsidianSearchReplaceTool = async (
                 flexibleWhitespace: params.flexibleWhitespace,
                 wholeWord: params.wholeWord,
                 returnContent: params.returnContent,
+                verify: params.verify,
               },
             });
           logger.debug(`Handling '${toolName}' request`, handlerContext);

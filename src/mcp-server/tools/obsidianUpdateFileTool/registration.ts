@@ -47,7 +47,7 @@ export const registerObsidianUpdateFileTool = async (
 ): Promise<void> => {
   const toolName = "obsidian_update_file";
   const toolDescription =
-    "Tool to modify Obsidian notes (specified by file path, the active file, or a periodic note) using whole-file operations: 'append', 'prepend', or 'overwrite'. Options allow creating missing files/targets and controlling overwrite behavior. Returns success status, message, a formatted timestamp string, file stats (stats), and optionally the final file content.";
+    "Tool to modify Obsidian notes (specified by file path, the active file, or a periodic note) using whole-file operations: 'append', 'prepend', or 'overwrite'. Options allow creating missing files/targets and controlling overwrite behavior. The 'verify' option controls post-write verification depth ('none', 'metadata' [default], or 'full') to trade off speed against confirmation detail. Returns success status, message, a formatted timestamp string, file stats (stats, when verified), and optionally the final file content.";
 
   // Create a context for the registration process itself for better traceability.
   const registrationContext: RequestContext =
@@ -92,6 +92,7 @@ export const registerObsidianUpdateFileTool = async (
                 createIfNeeded: params.createIfNeeded,
                 overwriteIfExists: params.overwriteIfExists,
                 returnContent: params.returnContent,
+                verify: params.verify,
               },
             });
           logger.debug(
